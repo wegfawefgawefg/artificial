@@ -39,3 +39,11 @@
 
 # debug information files
 *.dwo
+
+openai.key
+build/
+CMakeCache.txt
+CMakeFiles/
+Testing/
+CTestTestfile.cmake
+compile_commands.json

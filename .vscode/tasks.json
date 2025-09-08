@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cmake: configure (dev)",
+      "type": "shell",
+      "command": "cmake --preset dev",
+      "problemMatcher": ["$gcc", "$msCompile"],
+      "group": "build"
+    },
+    {
+      "label": "cmake: build (dev)",
+      "type": "shell",
+      "command": "cmake --build --preset dev",
+      "problemMatcher": ["$gcc", "$msCompile"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "dependsOn": ["cmake: configure (dev)"]
+    },
+    {
+      "label": "run gub",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/gub",
+      "dependsOn": ["cmake: build (dev)"],
+      "options": {
+        "env": {
+          "SDL_VIDEODRIVER": "x11"
+        }
+      }
+    }
+  ]
+}

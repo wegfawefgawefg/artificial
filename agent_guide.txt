@@ -1,0 +1,138 @@
+Gub Engine — Agent Guide
+========================
+
+Notes
+-------
+keep it c+- style for gamedev. 
+we avoid nice pointers and use ints into arrays
+fixed size arrays for lots of stuff instead of vectors
+preallocate on startup for predictable memory usage
+dont call things manager
+
+Purpose
+-------
+This repo is a C++20 SDL2 + GLM scaffold for a moddable 2D top‑down engine (Factorio/Terraria‑inspired, Synthetik vibe). We’re prioritizing fast iteration, simple AABB physics, and mod‑defined content (Lua later). Rust enums are replaced with ints for moddability via data tables.
+
+Build + Run
+-----------
+- Dependencies: CMake 3.20+, C++20 compiler, SDL2 dev, GLM.
+- Debian setup: bash scripts/setup_debian.sh
+- CLI run: bash scripts/run.sh
+- VSCode: open folder → F5 (Run gub) or Ctrl+Shift+B to build.
+- Strictness: Werror + -Wall -Wextra -Wpedantic etc enabled by default.
+
+Project Structure (flat under src/)
+-----------------------------------
+- main.cpp: SDL2 window + main loop, fixed 60Hz update, rendering.
+- types.hpp: Integer IDs (modes, types) + VID {id, version}.
+- settings.hpp: Engine constants (timestep, maxima, debounce).
+- graphics.hpp: Minimal camera structs, TILE_SIZE.
+- inputs.hpp: Mouse/Menu/Playing inputs + debounce timers.
+- input_system.{hpp,cpp}: SDL polling → fills State inputs; bindings struct.
+- config.{hpp,cpp}: Simple .ini parser for input remaps (SDL scancode names).
+- state.hpp: State bag (mode, timing, flags, Entities, Stage, etc.).
+- entity.hpp: Entity data (AABB, pos/vel/size, health, physics_steps).
+- entities.{hpp,cpp}: Fixed‑capacity pool (1024) with versioned IDs (VID).
+- stage.hpp: Tile grid with bit‑packed flags (blocks_entities, blocks_projectiles).
+- projectiles.hpp: Projectile pool (1024), physics_steps, owner VID, AABB stepping.
+- particles.hpp: Placeholder; no‑op step.
+
+Current Behavior
+----------------
+- Window: centered, resizable, “always on top/utility” hint.
+- Rendering: solid tiles (gray), entities (blue rects), projectiles (red rects).
+- Stage: blocking border + a few obstacles sprinkled.
+- Entities: ~25 NPCs spawn in walkable tiles, wander randomly.
+- Projectiles: Left click spawns a bullet from screen center toward mouse, physics_steps=2.
+- Input remap: Reads config/input.ini (key=value, e.g., left=A, use_center=SPACE). Defaults applied if file missing.
+- FPS: Title shows FPS once per second.
+
+Physics and Collisions
+----------------------
+- AABB only, axis‑aligned.
+- Separate‑axis resolution per sub‑step (X then Y) for both entities and projectiles to avoid diagonal corner skipping.
+- No broad phase; data sizes capped (1024 entities/projectiles) so simple loops are OK.
+- Anti‑tunneling: physics_steps per object; movement subdivided within a frame.
+- Entities collide with tiles only (not with each other). Projectiles collide with tiles (if tile blocks projectiles) and entities (except the owner).
+- Immediate resolution: collisions are handled inline during stepping; no global event queue.
+
+IDs, Data, and Moddability Philosophy
+-------------------------------------
+- All discriminants are ints (not enums) so mods can define new types.
+- Plan: big tables for entities, projectiles, tiles keyed by string/id; engine stores compact int IDs.
+- Mods folder (planned):
+  mods/<modname>/
+    info.toml (name, version, deps, etc.)
+    graphics/, sounds/, music/
+    scripts/ (Lua): data.lua, control.lua, or free‑form files with require/imports
+- Lua API (planned):
+  - Register entity/projectile/tile definitions (properties + callbacks)
+  - Hooks: on_projectile_hit, on_step, on_spawn, etc.
+  - Resolve mod load order by info.toml deps; load base first.
+
+Input Remapping (.ini)
+----------------------
+- File: config/input.ini; lines like: left=A, use_center=SPACE, pick_up=E
+- Supported tokens: A–Z, 0–9, KP_0–KP_9, LEFT/RIGHT/UP/DOWN, SPACE, RETURN, ESCAPE, COMMA, PERIOD (.), MINUS (-), EQUALS (=).
+- Parser ignores comments (# …) and whitespace. Unknown tokens are skipped.
+
+Rendering Notes / Sprites
+-------------------------
+- Currently debug rectangles only; TILE_SIZE converts world units → pixels.
+- Next: SpriteIdRegistry (string → int) + atlas loader (deferred until assets exist).
+- Mods will reference sprites by name; engine resolves to int IDs at load.
+
+Coding Conventions / Guidelines
+-------------------------------
+- C++20, no exceptions added; standard library ok.
+- Keep changes tight; prefer clear data‑oriented structs.
+- Do not introduce enums for gameplay types; use ints.
+- Keep collisions AABB; if non‑AA visuals are needed, approximate with multiple AABBs or swept sub‑steps, not OBB math.
+- Resolve collisions immediately inside the stepping loop; avoid global event buses.
+- Maintain separate‑axis resolution for tile collisions.
+- Keep pools capped (1024 entities/projectiles) unless explicitly changed.
+- Respect strict warnings; fix conversions explicitly (static_cast<>) to keep -Werror clean.
+
+Where To Add Things
+-------------------
+- New movement/collision logic: main.cpp (simulation block) or factor to a small helper.
+- New entity/projectile fields: entity.hpp / projectiles.hpp.
+- Spawn/iterate: entities.cpp pool; main loop drives logic.
+- Keyboard remaps: add scancode tokens in config.cpp; use InputBindings.
+- Tile behavior: stage.hpp (add more flags or metadata).
+- Sprite mapping: new atlas/registry headers; keep IDs as ints.
+- Mod loader: new loader under src/ (lua/… later) and root mods/ tree.
+
+Known Gaps / TODO
+-----------------
+- No textures/shaders/audio yet; pure SDL renderer rectangles.
+- Camera not yet applied to render transforms; drawing uses tile space → pixels directly.
+- No persistence besides input.ini; no save games.
+- No Lua runtime; only the plan and entry points to wire.
+- No “eject if spawned inside tile” routine (add simple upward nudge or retry spawn).
+- Projectile on‑hit callback is a lambda stub; will be bridged to Lua later.
+
+Local Run Book (quick)
+----------------------
+1) Debian deps: bash scripts/setup_debian.sh
+2) Build+run: bash scripts/run.sh (or VSCode F5)
+3) Remap keys: edit config/input.ini and rerun.
+
+Design Rationale / Thoughts
+---------------------------
+- Keep it simple and fast: AABB, per‑axis, immediate resolution, and discrete sub‑steps cover most needs without heavy physics.
+- Int IDs + fat data tables: enables mod freedom; engine stays a toolbox.
+- No event system: simpler mental model; mods get direct callbacks once Lua is wired.
+- Axis‑separate motion: avoids diagonal corner tunneling without swept AABBs.
+- physics_steps: per‑object tuning for fast movers eliminates most tunneling.
+- Flat file layout: quicker navigation; matches owner’s style.
+
+Next Suggested Steps
+--------------------
+- Add SpriteIdRegistry + stub atlas loader (paths under mods/base/graphics).
+- Create mods/base with info.toml and folder skeleton.
+- Integrate Lua (sol2/lua C API) and load data.lua/control.lua per mod with a simple dependency resolver.
+- Expose minimal C API to Lua for spawning entities/projectiles and setting callbacks.
+- Add simple recoil/gun demo; projectiles with owner, damage, and on‑hit Lua hook.
+- Add ASan/UBSan dev preset if desired (optional).
+
