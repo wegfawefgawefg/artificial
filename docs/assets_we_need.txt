@@ -1,0 +1,17 @@
+Assets Needed (namespaced, missing in repo)
+==========================
+
+Sounds (mods/base/sounds/)
+- base:jam => jam.wav (or .ogg) [fallback uses base:ui_cant]
+- base:pickup => pickup.wav (or .ogg) [fallback uses base:drop]
+- base:use => use.wav (or .ogg) [fallback uses base:ui_confirm]
+
+Sprites (mods/base/graphics/)
+- base:armor_plate => armor_plate.png
+- base:power_core => power_core.png
+- base:stim_pack => stim_pack.png
+- base:pistol => pistol.png (ground gun sprite)
+- base:rifle => rifle.png (ground gun sprite)
+
+Optional (if used):
+- base:base_bullet => bullet.png (if we want a visible projectile sprite)

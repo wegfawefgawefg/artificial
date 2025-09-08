@@ -64,6 +64,7 @@ void build_inputs(const InputBindings &bind, const InputContext &ctx, State &sta
   // Allow both bound key and legacy 'E' during transition
   pi.pick_up = is_down(bind.pick_up) || is_down(SDL_SCANCODE_E);
   pi.drop = is_down(bind.drop);
+  pi.reload = is_down(bind.reload);
   // number row keys 1..0
   pi.num_row_1 = is_down(SDL_SCANCODE_1);
   pi.num_row_2 = is_down(SDL_SCANCODE_2);

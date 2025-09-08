@@ -19,6 +19,7 @@ struct InputBindings {
 
   SDL_Scancode pick_up = SDL_SCANCODE_F;
   SDL_Scancode drop = SDL_SCANCODE_Q;
+  SDL_Scancode reload = SDL_SCANCODE_R;
 };
 
 struct InputContext { float wheel_delta{0.0f}; };

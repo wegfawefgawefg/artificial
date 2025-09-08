@@ -49,6 +49,7 @@ struct PlayingInputs {
   bool select_inventory_index_5{false}, select_inventory_index_6{false}, select_inventory_index_7{false}, select_inventory_index_8{false}, select_inventory_index_9{false};
   bool use_left{false}, use_right{false}, use_up{false}, use_down{false}, use_center{false};
   bool pick_up{false}, drop{false};
+  bool reload{false};
   static PlayingInputs make() { return {}; }
 };
 
@@ -67,4 +68,3 @@ struct PlayingInputDebounceTimers {
   }
   static PlayingInputDebounceTimers make() { return {}; }
 };
-

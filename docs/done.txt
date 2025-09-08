@@ -1,0 +1,33 @@
+Done Log
+========
+
+Core (current session)
+- Vendored sol2: sol/sol.hpp with minimal sol/config.hpp; CMake detects and defines GUB_USE_SOL2.
+- Lua bindings via sol2: register_powerup/register_item/register_gun; api table (add_plate, heal, add_move_speed).
+- Items: desc + triggers (on_use, on_tick, on_shoot, on_damage placeholder). Engine calls on_use/on_tick/on_shoot.
+- Pickups/Items: auto-pickup powerups; items require pickup key (F with legacy E support).
+- Inventory UI: slots 1–0; right panel shows selected item details including desc from Lua.
+- Guns: GunsPool + GroundGunsPool; enemies can drop guns (weighted from Lua drops); F equips ground guns; RPM cooldown; per-instance mag/reserve.
+- Drops: content.lua declares weighted drop tables for powerups/items/guns; used on enemy death. Fallback heuristic preserved.
+- Sprites: SDL2_image textures loaded via TextureStore; SpriteIdRegistry + SpriteStore built from mods/*/graphics with manifests + fallback.
+- Movement: player speed scales with stats.move_speed baseline 350.
+- Docs: stats_and_triggers.md added. Added modifiers.md (design draft) and assets_we_need.txt (missing assets list).
+
+Recent session (added)
+- VID instances across guns/items; inventory/ground/equipped hold VIDs.
+- Inventory drop mode (Q + 1–0). Guns drop as GroundGuns; items drop 1 per press.
+- Auto-stacking guarded by def_type + modifiers_hash + no cooldown.
+- Namespaced assets for sprites and sounds; auto-prefix by mod when missing.
+- Sound system (SDL_mixer): per-gun/item sounds + fallbacks; loader scans mods.
+- Crates fully driven by Lua (defs, crates UI/label, crate drops, on_open); spawn_crate is safe-by-default.
+- Projectiles from Lua defs; guns specify projectile_type. Spawned ahead of player with owner set.
+- Manual reload with debounce; “drop mag” alert once; jam/unjam with progress and sounds.
+- Fire modes: auto, single (edge-triggered), burst (burst_count/burst_rpm).
+
+Safety/Polish
+- Spawn safety: nearest-walkable search nudges spawns; ground items gently repel each other.
+- Visual clarity: NPCs red; pickups/items drawn with outline when overlapped; pickup prompt UI.
+
+Scaffolding
+- Mods scaffold: mods/base/ with info.toml and folders (graphics, sounds, music, scripts). Base content in scripts/content.lua.
+- Hot reload: ModsManager scans and rebuilds sprite registry/store on asset changes; script changes detected.

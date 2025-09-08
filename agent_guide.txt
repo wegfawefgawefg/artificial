@@ -11,14 +11,15 @@ dont call things manager
 
 Purpose
 -------
-This repo is a C++20 SDL2 + GLM scaffold for a moddable 2D top‑down engine (Factorio/Terraria‑inspired, Synthetik vibe). We’re prioritizing fast iteration, simple AABB physics, and mod‑defined content (Lua later). Rust enums are replaced with ints for moddability via data tables.
+This repo is a C++20 SDL2 + GLM engine scaffold for a moddable 2D top‑down game (Factorio/Terraria‑inspired, Synthetik vibe). We prioritize fast iteration, simple AABB physics, and mod‑defined content via Lua. Discriminants are ints (not enums) to keep data tables/modding flexible.
 
 Build + Run
 -----------
-- Dependencies: CMake 3.20+, C++20 compiler, SDL2 dev, GLM.
+- Dependencies: CMake 3.20+, C++20 compiler, SDL2 dev, GLM, Lua 5.4, SDL2_image, SDL2_ttf.
 - Debian setup: bash scripts/setup_debian.sh
-- CLI run: bash scripts/run.sh
-- VSCode: open folder → F5 (Run gub) or Ctrl+Shift+B to build.
+- Configure: cmake -S . -B build
+- Build: cmake --build build -j
+- Run: ./build/gub (or bash scripts/run.sh)
 - Strictness: Werror + -Wall -Wextra -Wpedantic etc enabled by default.
 
 Project Structure (flat under src/)
@@ -40,12 +41,12 @@ Project Structure (flat under src/)
 Current Behavior
 ----------------
 - Window: centered, resizable, “always on top/utility” hint.
-- Rendering: solid tiles (gray), entities (blue rects), projectiles (red rects).
-- Stage: blocking border + a few obstacles sprinkled.
-- Entities: ~25 NPCs spawn in walkable tiles, wander randomly.
-- Projectiles: Left click spawns a bullet from screen center toward mouse, physics_steps=2.
-- Input remap: Reads config/input.ini (key=value, e.g., left=A, use_center=SPACE). Defaults applied if file missing.
-- FPS: Title shows FPS once per second.
+- Rendering: tiles; entities/pickups/items/guns render with sprites if available (SDL2_image textures) with AABB overlays for debug.
+- Stage: blocking border + sprinkled obstacles; spawn safety nudges spawns to nearest walkable tile; ground items gently repel.
+- Entities: ~25 NPCs spawn and wander; player + NPC sprites if found under mods/base/graphics/.
+- Projectiles: Left click fires toward mouse; per‑object physics_steps=2; NPCs can die and drop powerups/items/guns via Lua‑defined weighted tables.
+- Input remap: Reads config/input.ini (key=value). Pickup key default is F (legacy E still works).
+- UI: Pickup prompt when overlapping; inventory panel with hotkeys 1–0 and item details; basic gun equip/use logic.
 
 Physics and Collisions
 ----------------------
@@ -59,28 +60,30 @@ Physics and Collisions
 IDs, Data, and Moddability Philosophy
 -------------------------------------
 - All discriminants are ints (not enums) so mods can define new types.
-- Plan: big tables for entities, projectiles, tiles keyed by string/id; engine stores compact int IDs.
-- Mods folder (planned):
+- Data lives in Lua tables (powerups/items/guns); engine stores compact int IDs.
+- Mods folder:
   mods/<modname>/
     info.toml (name, version, deps, etc.)
     graphics/, sounds/, music/
-    scripts/ (Lua): data.lua, control.lua, or free‑form files with require/imports
-- Lua API (planned):
-  - Register entity/projectile/tile definitions (properties + callbacks)
-  - Hooks: on_projectile_hit, on_step, on_spawn, etc.
-  - Resolve mod load order by info.toml deps; load base first.
+    scripts/ (Lua): free‑form (e.g., content.lua)
+- Lua API (current):
+  - register_powerup, register_item, register_gun
+  - Item callbacks: on_use, on_tick(dt), on_shoot, on_damage(attacker_ap)
+  - api helpers: add_plate, heal, add_move_speed
+- Load order: base mod first; simple directory scan today.
 
 Input Remapping (.ini)
 ----------------------
-- File: config/input.ini; lines like: left=A, use_center=SPACE, pick_up=E
+- File: config/input.ini; lines like: left=A, use_center=SPACE, pick_up=F, drop=Q
 - Supported tokens: A–Z, 0–9, KP_0–KP_9, LEFT/RIGHT/UP/DOWN, SPACE, RETURN, ESCAPE, COMMA, PERIOD (.), MINUS (-), EQUALS (=).
 - Parser ignores comments (# …) and whitespace. Unknown tokens are skipped.
 
 Rendering Notes / Sprites
 -------------------------
-- Currently debug rectangles only; TILE_SIZE converts world units → pixels.
-- Next: SpriteIdRegistry (string → int) + atlas loader (deferred until assets exist).
-- Mods will reference sprites by name; engine resolves to int IDs at load.
+- SpriteIdRegistry (string → int) and SpriteStore (rich defs) scan mods/*/graphics/.
+- Manifests: optional .sprite/.sprite.toml sidecars; fallback is whole‑image single frame.
+- Textures: SDL2_image loads PNGs; entities/items/powerups/guns render textures with AABB debug overlays.
+- Hot reload: polling detects asset changes and rebuilds sprite data; IDs stay stable by name.
 
 Coding Conventions / Guidelines
 -------------------------------
@@ -95,28 +98,30 @@ Coding Conventions / Guidelines
 
 Where To Add Things
 -------------------
-- New movement/collision logic: main.cpp (simulation block) or factor to a small helper.
+- Movement/collision logic: src/main.cpp (simulation block) or small helpers.
 - New entity/projectile fields: entity.hpp / projectiles.hpp.
 - Spawn/iterate: entities.cpp pool; main loop drives logic.
-- Keyboard remaps: add scancode tokens in config.cpp; use InputBindings.
-- Tile behavior: stage.hpp (add more flags or metadata).
-- Sprite mapping: new atlas/registry headers; keep IDs as ints.
-- Mod loader: new loader under src/ (lua/… later) and root mods/ tree.
+- Keyboard remaps: tokens in config.cpp; use InputBindings.
+- Tile behavior: stage.hpp (add flags/metadata).
+- Sprites/Textures: sprites.* for defs/ids, tex.* for textures; IDs remain ints.
+- Mod loader: mods.* and mods/ tree.
 
-Known Gaps / TODO
------------------
-- No textures/shaders/audio yet; pure SDL renderer rectangles.
-- Camera not yet applied to render transforms; drawing uses tile space → pixels directly.
-- No persistence besides input.ini; no save games.
-- No Lua runtime; only the plan and entry points to wire.
-- No “eject if spawned inside tile” routine (add simple upward nudge or retry spawn).
-- Projectile on‑hit callback is a lambda stub; will be bridged to Lua later.
+Open Work
+---------
+- Stat modifier system (add/mul, durations, stacking) to replace direct stat edits.
+- on_damage trigger wiring through damage paths (player/enemy) with plates + armor/AP.
+- Gun polish: reload/eject timing, heat/cool dynamics, reload key, UI bars.
+- Camera polish: zoom/pan UX; tidy transforms.
+- Settings persistence: write .ini changes from in‑game menu.
+- Clean up legacy C API path once sol2 is standard.
+- See docs/todo_high_level.md and docs/todo_low_level.md for details.
 
 Local Run Book (quick)
 ----------------------
-1) Debian deps: bash scripts/setup_debian.sh
+1) Install deps: sudo apt-get install liblua5.4-dev libsdl2-image-dev libsdl2-ttf-dev
 2) Build+run: bash scripts/run.sh (or VSCode F5)
-3) Remap keys: edit config/input.ini and rerun.
+3) Place PNGs under mods/base/graphics/ (filenames match sprite keys)
+4) Remap keys: edit config/input.ini and rerun.
 
 Design Rationale / Thoughts
 ---------------------------
@@ -135,4 +140,3 @@ Next Suggested Steps
 - Expose minimal C API to Lua for spawning entities/projectiles and setting callbacks.
 - Add simple recoil/gun demo; projectiles with owner, damage, and on‑hit Lua hook.
 - Add ASan/UBSan dev preset if desired (optional).
-

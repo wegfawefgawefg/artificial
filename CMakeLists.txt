@@ -172,6 +172,23 @@ if (PkgConfig_FOUND)
   endif()
 endif()
 
+# SDL2_mixer for audio
+set(SDL2_MIXER_FOUND_LOCAL OFF)
+if (PkgConfig_FOUND)
+  pkg_check_modules(SDL2_MIXER QUIET IMPORTED_TARGET SDL2_mixer)
+  if (SDL2_MIXER_FOUND)
+    set(SDL2_MIXER_FOUND_LOCAL ON)
+    target_link_libraries(gub PRIVATE PkgConfig::SDL2_MIXER)
+  endif()
+endif()
+if (NOT SDL2_MIXER_FOUND_LOCAL)
+  if (GUB_REQUIRE_DEPS)
+    message(FATAL_ERROR "SDL2_mixer not found. Install libsdl2-mixer-dev.")
+  else()
+    message(WARNING "SDL2_mixer not found. Audio playback will not work.")
+  endif()
+endif()
+
 # sol2 (optional header-only). If found, enable GUB_USE_SOL2
 if (EXISTS "${CMAKE_SOURCE_DIR}/sol/sol.hpp")
   set(SOL2_INCLUDE_DIR ${CMAKE_SOURCE_DIR})

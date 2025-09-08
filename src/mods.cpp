@@ -187,8 +187,10 @@ bool ModsManager::build_sprite_registry(SpriteIdRegistry &registry)
       if (!entry.is_regular_file())
         continue;
       auto stem = entry.path().stem().string();
-      if (!stem.empty())
-        names.push_back(stem);
+      if (!stem.empty()) {
+        std::string ns = m.name + ":" + stem;
+        names.push_back(ns);
+      }
     }
   }
   registry.rebuild_from(names);
@@ -237,6 +239,10 @@ bool ModsManager::build_sprite_store(SpriteStore &store)
         std::string err;
         if (parse_sprite_manifest_file(p.string(), def, err))
         {
+          // Namespace the sprite name if missing a prefix
+          if (def.name.find(':') == std::string::npos) {
+            def.name = m.name + ":" + def.name;
+          }
           // Resolve image path relative to mod root if not absolute
           if (!def.image_path.empty() && !fs::path(def.image_path).is_absolute())
           {
@@ -278,11 +284,12 @@ bool ModsManager::build_sprite_store(SpriteStore &store)
       if (!is_image_ext(ext))
         continue;
       std::string stem = p.stem().string();
-      if (defs_by_name.find(stem) != defs_by_name.end())
+      std::string nsname = m.name + ":" + stem;
+      if (defs_by_name.find(nsname) != defs_by_name.end())
         continue; // manifest already defined
-      SpriteDef d = make_default_sprite_from_image(stem, p.string());
-      defs_by_name.emplace(stem, std::move(d));
-      name_to_modroot[stem] = m.path;
+      SpriteDef d = make_default_sprite_from_image(nsname, p.string());
+      defs_by_name.emplace(nsname, std::move(d));
+      name_to_modroot[nsname] = m.path;
     }
   }
 

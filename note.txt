@@ -1,97 +1,23 @@
- ⌨️ cmake --build build -j
+What’s left / next
 
-codex
-Solid. I tackled the immediate fixes and lined up the Lua work.
+- Sounds: If you can confirm the filenames in mods/base/sounds (e.g., reload.wav, jam.wav,
+unjam.wav), I can wire exact keys or scan names and pick best matches.
+- Crate placement: Move room placement into Lua (e.g., a Lua map/room generator), or provide a
+lightweight Lua spawn_crate API.
+- Projectile pool instances: If you want projectile instances as VIDs with mutable state and
+modifiers (e.g., bouncy/poison/radiation), we can expand to a ProjectilePool with VID + per-instance
+tags. Current approach calls Lua hooks by def type, but we can pass richer context next.
+- Modifier model: We’ll integrate a unified modifier system to compute projectile effects from
+player-class, item, and gun scopes. For now, hooks exist so Lua can implement effects on hit.
+- Crate variants: Add crate type per def and draw small tint or icon. Also add ammo/heal/explode
+crates via on_open.
+- Audio namespaces: If we want collisions avoided, stick to namespaced keys mod:name. I can add a
+helper “play_any({mod1:key1, mod2:key2})” if needed.
 
-What I changed
+Tell me:
 
-- Safer spawns:
-    - Adds nearest-walkable search. Any pickup/item spawned in an impassable/void tile is nudged to the nearest walkable tile center. Applies during room
-generation; keeps within bounds.
-    - Ground items gently repel each other every frame to avoid overlaps.
-    - Ground items gently repel each other every frame to avoid overlaps.
-- 
-Inventory behavior:
-    - Number keys 1–0 select slot; if the slot is:
-    - Gun (category=2) → equips as active gun and alerts.
-    - Usable (category=1) → uses and consumes one if applicable.
-- Inventory list hides when the character stats panel (C) is open. Camera follow toggle is V.
-Inventory list hides when the character stats panel (C) is open. Camera follow toggle is V.
-- 
-Visual clarity:
-    - NPCs are red now.
-    - Draws pickups (green squares) and items (cyan squares) with yellow outline when overlapped for the pickup-AABB debug.
-- 
-TODO list:
-    - Added a concrete todo.txt with tasks for Lua registries (required), sprite rendering, gun panel, armor/plate system, triggers, drops, and spawn
-safety.
-
-Next up: Lua-first content and sprites
-- Make Lua mandatory:
-    - I will wire the Lua C API (fail CMake if missing). The game will refuse to run if Lua is not present.
-- Minimal Lua API to start:
-    - register_sprite{name="player", image="player.png", frames=[...], ...}
-    - register_powerup{name="Power Core", ...}
-    - register_item{name="Bandage", category="usable", stack=3, on_use="heal(50)"}
-    - register_item{name="Armor Plate", on_use="add_plate(1)"}
-    - register_gun{name="Pistol", damage=..., rpm=..., recoil=..., mag=..., ammo_max=..., perks=[...]}
-- Base content (mods/base/scripts/content.lua):
-    - Player sprite, Zombie sprite.
-    - Items: Bandage, Health Kit, Conductor Hat (buffs move speed), Armor Plate.
-    - Guns: Pistol, Rifle.
-    - Simple spawn helper so room gen can place a few from the Lua registries (then I’ll remove C++ test spawns).
-- Sprites:
-    - Use the SpriteStore names from Lua; render AABB + sprite once the texture loader is in. I’ll integrate image loading (SDL_image or a tiny PNG loader)
-and draw sprites at entity/item positions while keeping AABB physics authoritative.
-
-Armor and triggers model
-
-- Armor plate:
-    - Tracks a plate count; on damage: if plate > 0, consume one and ignore this damage.
-- Armor vs armor piercing:
-    - reduction% = max(0, armor - armor_piercing), capped appropriately (e.g., 75) before applying to damage.
-- Triggers (Lua-defined):
-    - on_use, on_damage(attacker_ap), on_shoot, on_tick(dt)
-    - Lua functions can modify the player’s Stats (move_speed, regen, crit, etc.) or ephemeral state (plates).
-    - I’ll sketch and document this as a small “stats_and_triggers.md” along with the Lua API.
-
-One more quick polish commit I can do now
-
-- Remove the scroll behavior for inventory selection entirely (only number keys control selection). It’s not currently changing selection, so we’re good.
-- Keep the pickup prompt: I’ll add “Press F to pick up ” when you overlap a ground item, and move C++ test spawns out once Lua content spawns correctly.
-
-Let me proceed with:
-
-- Adding Lua as a hard dependency (CMake) and implementing the loader and registry structs.
-- Creating mods/base/scripts/content.lua with bandage, health kit, armor plate, conductor hat, pistol, rifle; and simple sprite registrations for player,
-zombie, bandage, health kit, hat.
-- Wiring room gen to use Lua registries and removing the C++ test spawns.
-- Integrating a texture loader to actually render the sprites alongside the AABB debug.
-
-If you have specific pistol/rifle numbers (damage, rpm, recoil, control, mag, ammo, heat/cool, reload/eject), share them and I’ll plug them in so the
-right-side panel is meaningful on day one.
-
-
-
-Next Steps (queued in todo.txt)
-
-- Sol2: swap bindings to sol2 and keep Lua required in CMake.
-- Sprites: finish texture path mapping from Lua (optional register_sprite or sprite key on defs).
-- Gun model + right panel: add gun stats view (damage, rpm, recoil, control, mag, ammo, heat/cool, reload/eject, perks).
-- Armor/plates:
-    - Implement plates (consume one on hit before HP).
-    - Armor vs AP: reduce damage by max(0, armor − AP)% (cap at practical limit).
-- Triggers (Lua):
-    - on_use, on_damage(attacker_ap), on_shoot, on_tick(dt) to modify Stats and transient state.
-    - Document in a stats_and_triggers.md.
-- Drops: replace room test spawns with on-kill drop tables (Lua-defined).
-- Sprites for player/zombie/items: make sure PNGs live under mods/base/graphics (filenames should match Lua sprite names or stems). SpriteStore already
-picks up filenames; fallback is one-frame.
-
-What you need to do locally
-
-- Install deps: sudo apt-get install liblua5.4-dev libsdl2-image-dev libsdl2-ttf-dev
-- Put PNGs under mods/base/graphics/:
-    - player.png, zombie.png, bandage.png, health_kit.png, conductor_hat.png, armor_plate.png, etc.
-- Build: cmake --preset dev && cmake --build --preset dev -j
-- Run: build/gub (or --headless --frames=720 for a timed run)
+- Do you want me to move crate spawning into Lua now (e.g., spawn a few near spawn or at weighted
+positions)?
+- Should I add per-gun jam_chance to the example guns in mods/base/scripts/content.lua and a simple
+bullet projectile def?
+- Confirm your actual sound filenames so I can wire plays to the right keys.

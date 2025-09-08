@@ -58,9 +58,6 @@ struct Entity {
     int plates{0};
   } stats{};
 
-  // Equipment placeholders
-  int primary_gun_id{-1};
-  int secondary_gun_id{-1};
-  int active_item_id{-1};
-  int primary_gun_inst{-1};
+  // Equipment
+  std::optional<VID> equipped_gun_vid{};
 };

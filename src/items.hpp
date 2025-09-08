@@ -4,58 +4,44 @@
 #include <cstdint>
 #include <string>
 #include <glm/glm.hpp>
+#include "pool.hpp"
+#include "luamgr.hpp"
+#include "types.hpp"
 
-struct Item {
+struct ItemInstance {
   bool active{false};
-  std::uint32_t type{0};
-  // category: 0=other, 1=usable, 2=gun
-  int category{0};
-  // inventory/display
-  std::string name{};
+  int def_type{0};
   uint32_t count{1};
-  uint32_t max_count{1};
-  // usage
-  float range{0.0f};
-  float min_range{0.0f};
+  // Runtime state
   float use_cooldown{0.0f};
   float use_cooldown_countdown{0.0f};
-  bool consume_on_use{false};
-  bool droppable{true};
-  // sprite id placeholder
-  int sprite_id{-1};
-
-  bool is_stackable() const { return max_count > 1; }
+  std::uint32_t modifiers_hash{0}; // items with different mods must not stack
 };
 
-class ItemsPool {
+class ItemsPool : public Pool<ItemInstance, 1024> {
 public:
-  static constexpr std::size_t MAX = 1024;
-  ItemsPool() { items.resize(MAX); }
-  Item* spawn(std::uint32_t type) {
-    for (auto& it : items) if (!it.active) { it.active = true; it.type = type; return &it; }
-    return nullptr;
+  std::optional<VID> spawn_from_def(const ItemDef& d, uint32_t count = 1) {
+    auto v = alloc();
+    if (!v) return std::nullopt;
+    if (auto* it = get(*v)) { it->def_type = d.type; it->count = count; }
+    return v;
   }
-  void clear() { for (auto& it : items) it.active = false; }
-  std::vector<Item>& data() { return items; }
-  const std::vector<Item>& data() const { return items; }
-private:
-  std::vector<Item> items;
 };
 
-// Ground item: a world object containing an Item at a position (requires pressing F to pick up)
+// Ground item: a world object referencing an ItemInstance by VID
 struct GroundItem {
   bool active{false};
-  Item item{};
+  VID item_vid{};
   glm::vec2 pos{0.0f, 0.0f};
   glm::vec2 size{0.25f, 0.25f};
 };
 
 class GroundItemsPool {
 public:
-  static constexpr std::size_t MAX = 256;
+  static constexpr std::size_t MAX = 1024;
   GroundItemsPool() { items.resize(MAX); }
-  GroundItem* spawn(const Item& it, glm::vec2 pos) {
-    for (auto& gi : items) if (!gi.active) { gi.active = true; gi.item = it; gi.pos = pos; return &gi; }
+  GroundItem* spawn(VID item_vid, glm::vec2 pos) {
+    for (auto& gi : items) if (!gi.active) { gi.active = true; gi.item_vid = item_vid; gi.pos = pos; return &gi; }
     return nullptr;
   }
   void clear() { for (auto& gi : items) gi.active = false; }

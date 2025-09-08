@@ -1,23 +1,9 @@
-What I implemented (current session)
-- Vendored sol2: moved sol.hpp to sol/sol.hpp and added minimal sol/config.hpp. CMake detects it and defines GUB_USE_SOL2.
-- Lua bindings via sol2: register_powerup/item/gun bound as typed functions; api table (add_plate, heal, add_move_speed) available to Lua.
-- Items: added desc + triggers (on_use, on_tick(dt), on_shoot, on_damage). Engine calls on_use, on_tick, on_shoot now; on_damage hook ready.
-- Pickups/Items: auto-pickup powerups, items require pickup key. Made pickup tolerant to legacy E and new F key.
-- Inventory UI: list with hotkeys 1–0; right panel shows selected item details including Desc from Lua.
-- Guns: added GunsPool and GroundGunsPool; enemies can drop guns (weighted from Lua drops); F equips ground guns; firing uses gun RPM cooldown and per-instance mag/reserve.
-- Drops: content.lua can declare weighted drops tables for powerups/items/guns; used on enemy death. Fallback heuristic kept.
-- Sprites: SDL2_image loads textures from SpriteStore; entities/items/powerups/guns render sprites (with AABB overlays).
-- Movement: player speed scales with stats.move_speed baseline 350.
-- Docs: added docs/stats_and_triggers.md.
+Consolidated
+============
 
-What I was/ am working on next
-- Stat modifier system: additive/multiplicative modifiers with durations/stacking; replace direct stat edits (e.g., Conductor Hat) with modifiers; expose Lua helpers.
-- on_damage trigger wiring: add a simple player damage path (e.g., enemy projectile) and call Lua on_damage(attacker_ap); integrate plates + armor/AP reduction.
-- Gun polish: proper reload/eject timing, heat/cool dynamics, reload key, UI for ammo/heat/reload bars.
-- Clean-up: remove C API registration path now that sol2 is active; keep C API only if sol2 is unavailable.
-- Lua-driven spawn/drop refinements: per-enemy drop tables, rarity tuning, and UI prompts.
-- Sprites: optional register_sprite from Lua (frames/pivot/fps) if needed, else keep manifest/auto-discovery.
+This note has been consolidated into docs:
+- Implemented work: docs/done.txt
+- High-level TODO: docs/todo_high_level.md
+- Low-level TODO: docs/todo_low_level.md
 
-Notes
-- Config: default pickup key moved to F, but E still works for now (for legacy configs). Update config/input.ini to pick_up=F to use only F.
-- Required deps: Lua 5.4, SDL2_image, SDL2_ttf. PNGs should live under mods/base/graphics with names matching Lua sprite keys.
+See agent_guide.txt for updated overview and current behavior.

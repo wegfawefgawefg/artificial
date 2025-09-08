@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 #include "luamgr.hpp"
+#include "pool.hpp"
 
 struct GunInstance {
   bool active{false};
@@ -11,25 +12,25 @@ struct GunInstance {
   int current_mag{0};
   int ammo_reserve{0};
   float heat{0.0f};
+  bool jammed{false};
+  float unjam_progress{0.0f}; // 0..1 when mashing space
+  int burst_remaining{0};
+  float burst_timer{0.0f};
 };
 
-class GunsPool {
+class GunsPool : public Pool<GunInstance, 1024> {
 public:
-  static constexpr std::size_t MAX = 64;
-  GunsPool() { items.resize(MAX); }
-  int spawn_from_def(const GunDef& d) {
-    for (std::size_t i=0;i<items.size();++i) if (!items[i].active) {
-      items[i].active = true; items[i].def_type = d.type; items[i].current_mag = d.mag; items[i].ammo_reserve = d.ammo_max; items[i].heat = 0.0f; return (int)i; }
-    return -1;
+  std::optional<VID> spawn_from_def(const GunDef& d) {
+    auto v = alloc();
+    if (!v) return std::nullopt;
+    if (auto* gi = get(*v)) { gi->def_type = d.type; gi->current_mag = d.mag; gi->ammo_reserve = d.ammo_max; gi->heat = 0.0f; }
+    return v;
   }
-  GunInstance* get_mut(int id) { if (id<0) return nullptr; std::size_t i=(std::size_t)id; if (i>=items.size()) return nullptr; return &items[i]; }
-  const GunInstance* get(int id) const { if (id<0) return nullptr; std::size_t i=(std::size_t)id; if (i>=items.size()) return nullptr; return &items[i]; }
-  std::vector<GunInstance> items;
 };
 
 struct GroundGun {
   bool active{false};
-  int gun_inst_id{-1};
+  VID gun_vid{};
   glm::vec2 pos{0.0f, 0.0f};
   glm::vec2 size{0.25f, 0.25f};
   int sprite_id{-1};
@@ -37,10 +38,10 @@ struct GroundGun {
 
 class GroundGunsPool {
 public:
-  static constexpr std::size_t MAX = 64;
+  static constexpr std::size_t MAX = 1024;
   GroundGunsPool() { items.resize(MAX); }
-  GroundGun* spawn(int inst_id, glm::vec2 p, int sprite_id) {
-    for (auto& g : items) if (!g.active) { g.active=true; g.gun_inst_id=inst_id; g.pos=p; g.sprite_id=sprite_id; return &g; }
+  GroundGun* spawn(VID gun_vid, glm::vec2 p, int sprite_id) {
+    for (auto& g : items) if (!g.active) { g.active=true; g.gun_vid=gun_vid; g.pos=p; g.sprite_id=sprite_id; return &g; }
     return nullptr;
   }
   void clear() { for (auto& g : items) g.active=false; }
@@ -49,4 +50,3 @@ public:
 private:
   std::vector<GroundGun> items;
 };
-

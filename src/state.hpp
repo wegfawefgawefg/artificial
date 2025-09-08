@@ -17,6 +17,7 @@
 #include "items.hpp"
 #include "pickups.hpp"
 #include "guns.hpp"
+#include "crates.hpp"
 
 struct State {
   int mode{ids::MODE_TITLE};
@@ -46,18 +47,26 @@ struct State {
   Particles particles{};
   Stage stage{64, 36};
   Inventory inventory = Inventory::make();
+  ItemsPool items{};
   PickupsPool pickups{};
   GroundItemsPool ground_items{};
   GunsPool guns{};
   GroundGunsPool ground_guns{};
+  CratesPool crates{};
+  int default_crate_type{0};
 
   // Firing cooldown (seconds)
   float gun_cooldown{0.0f};
+  // Jam base chance additive
+  float base_jam_chance{0.02f};
 
   bool rebuild_render_texture{true};
   float cloud_density{0.5f};
 
   bool camera_follow_enabled{true};
+
+  // Inventory drop mode: press Q to enter, then 1-0 to drop a slot
+  bool drop_mode{false};
 
   // Room / flow
   glm::ivec2 start_tile{-1, -1};
