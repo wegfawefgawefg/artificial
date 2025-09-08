@@ -219,7 +219,7 @@ init_ok:
     binds = *loaded;
   }
   // projectiles already declared above
-  float shoot_cooldown = 0.0f;
+  state.gun_cooldown = 0.0f;
   InputContext ictx{};
   // FPS counter state
   Uint64 perf_freq = SDL_GetPerformanceFrequency();
@@ -269,7 +269,9 @@ init_ok:
           if (state.playing_inputs.up) dir.y -= 1.0f;
           if (state.playing_inputs.down) dir.y += 1.0f;
           if (dir.x != 0.0f || dir.y != 0.0f) dir = glm::normalize(dir);
-          e.vel = dir * PLAYER_SPEED_UNITS_PER_SEC;
+          // Scale base speed by stats.move_speed (350 baseline)
+          float scale = (e.stats.move_speed > 0.0f) ? (e.stats.move_speed / 350.0f) : 1.0f;
+          e.vel = dir * (PLAYER_SPEED_UNITS_PER_SEC * scale);
         } else {
           // NPC random drift
           if (e.rot <= 0.0f) {
@@ -431,15 +433,12 @@ init_ok:
                 }
               } else if (ent->item.category == 1) {
                 // Use consumable via Lua on_use if present
-                std::string msg;
-                bool ok=false;
                 if (g_lua_mgr && state.player_vid) {
                   if (auto* pl = state.entities.get_mut(*state.player_vid)) {
-                    ok = g_lua_mgr->call_item_on_use((int)ent->item.type, state, *pl, &msg);
+                    (void)g_lua_mgr->call_item_on_use((int)ent->item.type, state, *pl, nullptr);
                   }
                 }
-                if (!ok) msg = std::string("Used ") + ent->item.name;
-                state.alerts.push_back({ msg, 0.0f, 2.0f, false });
+                state.alerts.push_back({ std::string("Used ") + ent->item.name, 0.0f, 2.0f, false });
                 if (ent->item.consume_on_use) state.inventory.remove_count_from_slot(idx, 1);
               }
             }
@@ -515,9 +514,10 @@ init_ok:
         }
       }
 
-      // spawn projectile on left mouse with small cooldown
-      shoot_cooldown = std::max(0.0f, shoot_cooldown - TIMESTEP);
-      if (state.mouse_inputs.left && shoot_cooldown == 0.0f) {
+      // spawn projectile on left mouse with small cooldown (uses gun rpm if equipped)
+      state.gun_cooldown = std::max(0.0f, state.gun_cooldown - TIMESTEP);
+      bool can_fire = (state.gun_cooldown == 0.0f);
+      if (state.mouse_inputs.left && can_fire) {
         // spawn from screen center towards mouse in world-space
         glm::vec2 p = state.player_vid ? state.entities.get(*state.player_vid)->pos
                                        : glm::vec2{ (float)state.stage.get_width()/2.0f, (float)state.stage.get_height()/2.0f };
@@ -528,9 +528,41 @@ init_ok:
                         gfx.play_cam.pos.y + (static_cast<float>(state.mouse_inputs.pos.y) - static_cast<float>(wh)*0.5f) * inv_scale };
         glm::vec2 dir = glm::normalize(m - p);
         if (glm::any(glm::isnan(dir))) dir = {1.0f, 0.0f};
-        auto* pr = projectiles.spawn(p, dir * 20.0f, {0.2f, 0.2f}, 2);
-        (void)pr;
-        shoot_cooldown = 0.1f; // 10 shots per second
+        // If gun equipped, respect ammo and rpm
+        float rpm = 600.0f; // default
+        bool fired = true;
+        if (state.player_vid) {
+          auto* plm = state.entities.get_mut(*state.player_vid);
+          if (plm && plm->primary_gun_inst >= 0) {
+            const GunInstance* gi = state.guns.get(plm->primary_gun_inst);
+            const GunDef* gd = nullptr; if (g_lua_mgr && gi) { for (auto const& g : g_lua_mgr->guns()) if (g.type == gi->def_type) { gd=&g; break; } }
+            if (gd && gi) {
+              rpm = (gd->rpm > 0.0f) ? gd->rpm : rpm;
+              GunInstance* gim = state.guns.get_mut(plm->primary_gun_inst);
+              if (gim->current_mag <= 0) {
+                // naive reload
+                int need = gd->mag - gim->current_mag;
+                int take = std::min(need, gim->ammo_reserve);
+                gim->current_mag += take; gim->ammo_reserve -= take;
+              }
+              if (gim->current_mag > 0) {
+                gim->current_mag -= 1;
+              } else {
+                fired = false;
+              }
+            }
+          }
+        }
+        if (fired) {
+          auto* pr = projectiles.spawn(p, dir * 20.0f, {0.2f, 0.2f}, 2);
+          (void)pr;
+          // on_shoot triggers for items in inventory
+          if (g_lua_mgr && state.player_vid) {
+            auto* plm = state.entities.get_mut(*state.player_vid);
+            if (plm) for (const auto& entry : state.inventory.entries) g_lua_mgr->call_item_on_shoot((int)entry.item.type, state, *plm);
+          }
+          state.gun_cooldown = std::max(0.05f, 60.0f / rpm);
+        }
       }
 
       // step projectiles with on-hit applying damage and drops
@@ -562,7 +594,40 @@ init_ok:
             std::uniform_real_distribution<float> U(0.0f, 1.0f);
             if (U(rng) < 0.5f && g_lua_mgr) {
               glm::vec2 place_pos = ensure_not_in_block(state, pos);
-              if (U(rng) < 0.5f && !g_lua_mgr->powerups().empty()) {
+              const auto& dt = g_lua_mgr->drops();
+              auto pick_weighted = [&](const std::vector<DropEntry>& v)->int{
+                if (v.empty()) return -1;
+                float sum = 0.0f;
+                for (auto const& de : v) sum += de.weight;
+                if (sum <= 0.0f) return -1;
+                std::uniform_real_distribution<float> du(0.0f, sum);
+                float r = du(rng);
+                float acc = 0.0f;
+                for (auto const& de : v) {
+                  acc += de.weight;
+                  if (r <= acc) return de.type;
+                }
+                return v.back().type;
+              };
+              if (!dt.powerups.empty() || !dt.items.empty() || !dt.guns.empty()) {
+                float c = U(rng);
+                if (c < 0.5f && !dt.powerups.empty()) {
+                  int t = pick_weighted(dt.powerups); if (t>=0) {
+                    auto it = std::find_if(g_lua_mgr->powerups().begin(), g_lua_mgr->powerups().end(), [&](const PowerupDef& p){ return p.type==t; });
+                    if (it!=g_lua_mgr->powerups().end()) { auto* p = state.pickups.spawn((std::uint32_t)it->type, it->name, place_pos); if (p) p->sprite_id = g_sprite_ids? g_sprite_ids->try_get(it->sprite.empty()? it->name : it->sprite) : -1; }
+                  }
+                } else if (c < 0.85f && !dt.items.empty()) {
+                  int t = pick_weighted(dt.items); if (t>=0) {
+                    auto it = std::find_if(g_lua_mgr->items().begin(), g_lua_mgr->items().end(), [&](const ItemDef& d){ return d.type==t; });
+                    if (it!=g_lua_mgr->items().end()) { Item itc{}; itc.active=true; itc.type=(std::uint32_t)it->type; itc.name=it->name; itc.count=1; itc.max_count=(std::uint32_t)it->max_count; itc.consume_on_use=it->consume_on_use; itc.category=it->category; itc.sprite_id = g_sprite_ids? g_sprite_ids->try_get(it->sprite.empty()? it->name : it->sprite) : -1; state.ground_items.spawn(itc, place_pos); }
+                  }
+                } else if (!dt.guns.empty()) {
+                  int t = pick_weighted(dt.guns); if (t>=0) {
+                    auto itg = std::find_if(g_lua_mgr->guns().begin(), g_lua_mgr->guns().end(), [&](const GunDef& g){ return g.type==t; });
+                    if (itg!=g_lua_mgr->guns().end()) { int inst = state.guns.spawn_from_def(*itg); int gspr = g_sprite_ids? g_sprite_ids->try_get(itg->name) : -1; state.ground_guns.spawn(inst, place_pos, gspr); }
+                  }
+                }
+              } else if (U(rng) < 0.5f && !g_lua_mgr->powerups().empty()) {
                 std::uniform_int_distribution<int> di(0, (int)g_lua_mgr->powerups().size()-1);
                 auto& pu = g_lua_mgr->powerups()[ (size_t)di(rng) ];
                 auto* p = state.pickups.spawn((std::uint32_t)pu.type, pu.name, place_pos);
@@ -580,6 +645,16 @@ init_ok:
                 state.ground_guns.spawn(inst, place_pos, gspr);
               }
             }
+          }
+        }
+      }
+
+      // on_tick triggers for items (player only) per fixed step
+      if (state.player_vid && g_lua_mgr) {
+        auto* pl = state.entities.get_mut(*state.player_vid);
+        if (pl) {
+          for (const auto& entry : state.inventory.entries) {
+            g_lua_mgr->call_item_on_tick((int)entry.item.type, state, *pl, TIMESTEP);
           }
         }
       }
@@ -924,6 +999,11 @@ init_ok:
           auto draw_txt = [&](const std::string& s, SDL_Color col){ SDL_Surface* srf=TTF_RenderUTF8_Blended(ui_font, s.c_str(), col); if(srf){ SDL_Texture* t=SDL_CreateTextureFromSurface(renderer,srf); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{tx,ty,tw,th}; SDL_RenderCopy(renderer,t,nullptr,&d); SDL_DestroyTexture(t); SDL_FreeSurface(srf);} ty += lh; };
           draw_txt(std::string("Selected: ") + sel->item.name, SDL_Color{255,255,255,255});
           draw_txt(std::string("Count: ") + std::to_string(sel->item.count) + "/" + std::to_string(sel->item.max_count), SDL_Color{220,220,220,255});
+          // If item definition has a description from Lua, show it
+          if (g_lua_mgr) {
+            const ItemDef* idf = nullptr; for (auto const& d : g_lua_mgr->items()) if ((int)d.type == (int)sel->item.type) { idf=&d; break; }
+            if (idf && !idf->desc.empty()) draw_txt(std::string("Desc: ") + idf->desc, SDL_Color{200,200,200,255});
+          }
           if (sel->item.range > 0.0f) draw_txt(std::string("Range: ") + std::to_string((int)std::lround(sel->item.range)), SDL_Color{220,220,220,255});
           if (sel->item.use_cooldown > 0.0f) draw_txt(std::string("Cooldown: ") + std::to_string(sel->item.use_cooldown) + "s", SDL_Color{220,220,220,255});
           draw_txt(std::string("Consumable: ") + (sel->item.consume_on_use?"Yes":"No"), SDL_Color{220,220,220,255});
@@ -954,7 +1034,16 @@ init_ok:
             draw_txt(std::string("RPM: ") + std::to_string((int)std::lround(gd->rpm)), SDL_Color{220,220,220,255});
             draw_txt(std::string("Recoil: ") + std::to_string(gd->recoil), SDL_Color{220,220,220,255});
             draw_txt(std::string("Control: ") + std::to_string(gd->control), SDL_Color{220,220,220,255});
-            draw_txt(std::string("Mag: ") + std::to_string(gd->mag) + std::string(" / Ammo: ") + std::to_string(gd->ammo_max), SDL_Color{220,220,220,255});
+          // Show instance ammo if available
+          if (state.player_vid) {
+            const Entity* ply2 = state.entities.get(*state.player_vid);
+            const GunInstance* gi = (ply2 && ply2->primary_gun_inst>=0) ? state.guns.get(ply2->primary_gun_inst) : nullptr;
+            if (gi) {
+              draw_txt(std::string("Mag: ") + std::to_string(gi->current_mag) + std::string(" / Reserve: ") + std::to_string(gi->ammo_reserve), SDL_Color{220,220,220,255});
+            } else {
+              draw_txt(std::string("Mag: ") + std::to_string(gd->mag) + std::string(" / Ammo: ") + std::to_string(gd->ammo_max), SDL_Color{220,220,220,255});
+            }
+          }
           }
         }
       }

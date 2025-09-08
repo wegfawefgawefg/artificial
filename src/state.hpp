@@ -51,6 +51,9 @@ struct State {
   GunsPool guns{};
   GroundGunsPool ground_guns{};
 
+  // Firing cooldown (seconds)
+  float gun_cooldown{0.0f};
+
   bool rebuild_render_texture{true};
   float cloud_density{0.5f};
 
