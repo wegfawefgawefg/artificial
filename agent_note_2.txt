@@ -1,9 +1,0 @@
-Consolidated
-============
-
-This note has been consolidated into docs:
-- Implemented work: docs/done.txt
-- High-level TODO: docs/todo_high_level.md
-- Low-level TODO: docs/todo_low_level.md
-
-See agent_guide.txt for updated overview and current behavior.

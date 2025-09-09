@@ -7,7 +7,7 @@ struct Crate {
     bool active{false};
     bool opened{false};
     glm::vec2 pos{0.0f, 0.0f};
-    glm::vec2 size{0.5f, 0.5f};
+    glm::vec2 size{0.45f, 0.20f};
     float open_progress{0.0f}; // seconds
     int def_type{0};
 };

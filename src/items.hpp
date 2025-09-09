@@ -17,6 +17,8 @@ struct ItemInstance {
     float use_cooldown{0.0f};
     float use_cooldown_countdown{0.0f};
     std::uint32_t modifiers_hash{0}; // items with different mods must not stack
+    // Optional ticking accumulator (opt-in via def.tick_rate_hz)
+    float tick_acc{0.0f};
 };
 
 class ItemsPool : public Pool<ItemInstance, 1024> {
@@ -38,7 +40,7 @@ struct GroundItem {
     bool active{false};
     VID item_vid{};
     glm::vec2 pos{0.0f, 0.0f};
-    glm::vec2 size{0.25f, 0.25f};
+    glm::vec2 size{0.125f, 0.125f};
 };
 
 class GroundItemsPool {

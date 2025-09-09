@@ -25,6 +25,9 @@ struct GunInstance {
   float ar_window_start{0.0f}; // fraction 0..1
   float ar_window_end{0.0f};   // fraction 0..1
   bool ar_consumed{false};
+  bool ar_failed_attempt{false};
+  // Optional ticking accumulator (opt-in via def.tick_rate_hz)
+  float tick_acc{0.0f};
 };
 
 class GunsPool : public Pool<GunInstance, 1024> {
@@ -47,7 +50,7 @@ struct GroundGun {
     bool active{false};
     VID gun_vid{};
     glm::vec2 pos{0.0f, 0.0f};
-    glm::vec2 size{0.25f, 0.25f};
+    glm::vec2 size{0.125f, 0.125f};
     int sprite_id{-1};
 };
 

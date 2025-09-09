@@ -58,8 +58,8 @@ void build_inputs(const InputBindings& bind, const InputContext& ctx, State& sta
     pi.use_up = is_down(bind.use_up);
     pi.use_down = is_down(bind.use_down);
     pi.use_center = is_down(bind.use_center);
-    // Allow both bound key and legacy 'E' during transition
-    pi.pick_up = is_down(bind.pick_up) || is_down(SDL_SCANCODE_E);
+    // Manual pickup key
+    pi.pick_up = is_down(bind.pick_up);
     pi.drop = is_down(bind.drop);
     pi.reload = is_down(bind.reload);
     pi.dash = is_down(bind.dash);

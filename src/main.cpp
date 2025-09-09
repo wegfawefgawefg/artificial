@@ -309,6 +309,66 @@ init_ok:
         while (state.time_since_last_update > TIMESTEP) {
             state.time_since_last_update -= TIMESTEP;
 
+            // Before-physics ticking (opt-in)
+            if (state.player_vid && g_lua_mgr) {
+                Entity* plbt = state.entities.get_mut(*state.player_vid);
+                if (plbt) {
+                    const float dt = TIMESTEP;
+                    const int MAX_TICKS = 4000;
+                    int tick_calls = 0;
+                    // Guns with on_step
+                    for (const auto& entry : state.inventory.entries) {
+                        if (entry.kind != INV_GUN)
+                            continue;
+                        GunInstance* gi = state.guns.get(entry.vid);
+                        if (!gi)
+                            continue;
+                        const GunDef* gd = nullptr;
+                        for (auto const& g : g_lua_mgr->guns())
+                            if (g.type == gi->def_type) {
+                                gd = &g;
+                                break;
+                            }
+                        if (!gd || gd->on_step_ref < 0)
+                            continue;
+                        if (gd->tick_rate_hz <= 0.0f || gd->tick_phase == "after")
+                            continue;
+                        gi->tick_acc += dt;
+                        float period = 1.0f / std::max(1.0f, gd->tick_rate_hz);
+                        while (gi->tick_acc >= period && tick_calls < MAX_TICKS) {
+                            g_lua_mgr->call_gun_on_step(gi->def_type, state, *plbt);
+                            gi->tick_acc -= period;
+                            ++tick_calls;
+                        }
+                    }
+                    // Items with on_tick
+                    for (const auto& entry : state.inventory.entries) {
+                        if (entry.kind != INV_ITEM)
+                            continue;
+                        ItemInstance* inst = state.items.get(entry.vid);
+                        if (!inst)
+                            continue;
+                        const ItemDef* idf = nullptr;
+                        for (auto const& d : g_lua_mgr->items())
+                            if (d.type == inst->def_type) {
+                                idf = &d;
+                                break;
+                            }
+                        if (!idf || idf->on_tick_ref < 0)
+                            continue;
+                        if (idf->tick_rate_hz <= 0.0f || idf->tick_phase == "after")
+                            continue;
+                        inst->tick_acc += dt;
+                        float period = 1.0f / std::max(1.0f, idf->tick_rate_hz);
+                        while (inst->tick_acc >= period && tick_calls < MAX_TICKS) {
+                            g_lua_mgr->call_item_on_tick(inst->def_type, state, *plbt, period);
+                            inst->tick_acc -= period;
+                            ++tick_calls;
+                        }
+                    }
+                }
+            }
+
             // Movement + physics: player controlled + NPC wander; keep inside non-block tiles
             for (auto& e : state.entities.data()) {
                 if (!e.active)
@@ -329,7 +389,7 @@ init_ok:
                     // Scale base speed by stats.move_speed (350 baseline)
                     float scale =
                         (e.stats.move_speed > 0.0f) ? (e.stats.move_speed / 350.0f) : 1.0f;
-                    // Dash handling: quick burst towards reticle with rechargeable stocks
+                    // Dash handling: quick burst in WASD (8-way) direction with rechargeable stocks
                     state.dash_timer = std::max(0.0f, state.dash_timer - TIMESTEP);
                     if (state.dash_stocks < state.dash_max) {
                         state.dash_refill_timer += TIMESTEP;
@@ -344,32 +404,23 @@ init_ok:
                     static bool prev_dash = false;
                     bool now_dash = state.playing_inputs.dash;
                     if (now_dash && !prev_dash && state.dash_stocks > 0) {
-                        state.dash_timer = DASH_TIME_SECONDS;
-                        state.dash_stocks -= 1;
-                        state.reticle_shake =
-                            std::max(state.reticle_shake, 8.0f); // kick the reticle
-                        if (g_lua_mgr && state.player_vid) {
-                            if (auto* pl = state.entities.get_mut(*state.player_vid))
-                                g_lua_mgr->call_on_dash(state, *pl);
+                        // Require a movement direction; use 8-way WASD vector
+                        if (dir.x != 0.0f || dir.y != 0.0f) {
+                            state.dash_dir = dir; // already normalized
+                            state.dash_timer = DASH_TIME_SECONDS;
+                            state.dash_stocks -= 1;
+                            state.reticle_shake =
+                                std::max(state.reticle_shake, 8.0f); // kick the reticle
+                            if (g_lua_mgr && state.player_vid) {
+                                if (auto* pl = state.entities.get_mut(*state.player_vid))
+                                    g_lua_mgr->call_on_dash(state, *pl);
+                            }
                         }
                     }
                     prev_dash = now_dash;
                     if (state.dash_timer > 0.0f) {
-                        // Aim towards mouse
-                        int ww = width, wh = height;
-                        SDL_GetRendererOutputSize(renderer, &ww, &wh);
-                        float inv_scale = 1.0f / (TILE_SIZE * gfx.play_cam.zoom);
-                        glm::vec2 m = {
-                            gfx.play_cam.pos.x + (static_cast<float>(state.mouse_inputs.pos.x) -
-                                                  static_cast<float>(ww) * 0.5f) *
-                                                     inv_scale,
-                            gfx.play_cam.pos.y + (static_cast<float>(state.mouse_inputs.pos.y) -
-                                                  static_cast<float>(wh) * 0.5f) *
-                                                     inv_scale};
-                        glm::vec2 aim = glm::normalize(m - e.pos);
-                        if (glm::any(glm::isnan(aim)))
-                            aim = {1.0f, 0.0f};
-                        e.vel = aim * DASH_SPEED_UNITS_PER_SEC;
+                        // Move in latched WASD direction
+                        e.vel = state.dash_dir * DASH_SPEED_UNITS_PER_SEC;
                     } else {
                         e.vel = dir * (PLAYER_SPEED_UNITS_PER_SEC * scale);
                     }
@@ -443,7 +494,8 @@ init_ok:
                 }
             }
 
-            // Shield regeneration after delay (3s no damage) and active reload progress/completion
+            // Shield regeneration after delay (3s no damage), global step, and active reload
+            // progress/completion
             for (auto& e : state.entities.data()) {
                 if (!e.active)
                     continue;
@@ -515,142 +567,173 @@ init_ok:
                     float pl = p->pos.x - ph.x, pr = p->pos.x + ph.x;
                     float pt = p->pos.y - ph.y, pb = p->pos.y + ph.y;
                     if (state.playing_inputs.pick_up) {
-                        // Guns first: add to inventory (do not auto-equip)
-                        {
-                            for (auto& gg : state.ground_guns.data())
-                                if (gg.active) {
-                                    glm::vec2 gh = gg.size * 0.5f;
-                                    float gl = gg.pos.x - gh.x, gr = gg.pos.x + gh.x;
-                                    float gt = gg.pos.y - gh.y, gb = gg.pos.y + gh.y;
-                                    bool overlap = !(pr <= gl || pl >= gr || pb <= gt || pt >= gb);
-                                    if (overlap) {
-                                        bool ok =
-                                            state.inventory.insert_existing(INV_GUN, gg.gun_vid);
-                                        std::string nm = "gun";
-                                        if (g_lua_mgr) {
-                                            if (const GunInstance* gi =
-                                                    state.guns.get(gg.gun_vid)) {
-                                                for (auto const& g : g_lua_mgr->guns())
-                                                    if (g.type == gi->def_type) {
-                                                        nm = g.name;
-                                                        break;
-                                                    }
-                                            }
+                        // Find single best overlap among guns/items by intersection area
+                        enum class PickKind { None, Gun, Item };
+                        PickKind best_kind = PickKind::None;
+                        std::size_t best_index = (std::size_t)-1;
+                        float best_area = 0.0f;
+                        auto overlap_area = [&](float al, float at, float ar, float ab, float bl,
+                                               float bt, float br, float bb) -> float {
+                            float xl = std::max(al, bl);
+                            float xr = std::min(ar, br);
+                            float yt = std::max(at, bt);
+                            float yb = std::min(ab, bb);
+                            float w = xr - xl;
+                            float h = yb - yt;
+                            if (w <= 0.0f || h <= 0.0f)
+                                return 0.0f;
+                            return w * h;
+                        };
+                        // Guns
+                        for (std::size_t i = 0; i < state.ground_guns.data().size(); ++i) {
+                            auto const& gg = state.ground_guns.data()[i];
+                            if (!gg.active)
+                                continue;
+                            glm::vec2 gh = gg.size * 0.5f;
+                            float gl = gg.pos.x - gh.x, gr = gg.pos.x + gh.x;
+                            float gt = gg.pos.y - gh.y, gb = gg.pos.y + gh.y;
+                            float area = overlap_area(pl, pt, pr, pb, gl, gt, gr, gb);
+                            if (area > best_area) {
+                                best_area = area;
+                                best_kind = PickKind::Gun;
+                                best_index = i;
+                            }
+                        }
+                        // Items
+                        for (std::size_t i = 0; i < state.ground_items.data().size(); ++i) {
+                            auto const& gi = state.ground_items.data()[i];
+                            if (!gi.active)
+                                continue;
+                            glm::vec2 gh = gi.size * 0.5f;
+                            float gl = gi.pos.x - gh.x, gr = gi.pos.x + gh.x;
+                            float gt = gi.pos.y - gh.y, gb = gi.pos.y + gh.y;
+                            float area = overlap_area(pl, pt, pr, pb, gl, gt, gr, gb);
+                            if (area > best_area) {
+                                best_area = area;
+                                best_kind = PickKind::Item;
+                                best_index = i;
+                            }
+                        }
+                        if (best_kind == PickKind::Gun) {
+                            auto& gg = state.ground_guns.data()[best_index];
+                            bool ok = state.inventory.insert_existing(INV_GUN, gg.gun_vid);
+                            std::string nm = "gun";
+                            if (g_lua_mgr) {
+                                if (const GunInstance* gi = state.guns.get(gg.gun_vid)) {
+                                    for (auto const& g : g_lua_mgr->guns())
+                                        if (g.type == gi->def_type) {
+                                            nm = g.name;
+                                            break;
                                         }
-                                        if (ok) {
-                                            gg.active = false;
-                                            state.alerts.push_back({std::string("Picked up ") + nm,
-                                                                    0.0f, 2.0f, false});
-                                            if (const GunInstance* ggi =
-                                                    state.guns.get(gg.gun_vid)) {
-                                                const GunDef* gd = nullptr;
-                                                if (g_lua_mgr) {
-                                                    for (auto const& g : g_lua_mgr->guns())
-                                                        if (g.type == ggi->def_type) {
-                                                            gd = &g;
-                                                            break;
-                                                        }
-                                                }
-                                                if (gd)
-                                                    sounds.play(gd->sound_pickup.empty()
-                                                                    ? "base:drop"
-                                                                    : gd->sound_pickup);
-                                                else
-                                                    sounds.play("base:drop");
+                                }
+                            }
+                            if (ok) {
+                                gg.active = false;
+                                state.alerts.push_back(
+                                    {std::string("Picked up ") + nm, 0.0f, 2.0f, false});
+                                if (const GunInstance* ggi = state.guns.get(gg.gun_vid)) {
+                                    const GunDef* gd = nullptr;
+                                    if (g_lua_mgr) {
+                                        for (auto const& g : g_lua_mgr->guns())
+                                            if (g.type == ggi->def_type) {
+                                                gd = &g;
+                                                break;
                                             }
-                                        } else {
-                                            state.alerts.push_back(
-                                                {"Inventory full", 0.0f, 1.5f, false});
-                                        }
+                                    }
+                                    if (g_lua_mgr && state.player_vid) {
+                                        if (auto* plent = state.entities.get_mut(*state.player_vid))
+                                            g_lua_mgr->call_gun_on_pickup(ggi->def_type, state,
+                                                                          *plent);
+                                    }
+                                    if (gd)
+                                        sounds.play(gd->sound_pickup.empty() ? "base:drop"
+                                                                             : gd->sound_pickup);
+                                    else
+                                        sounds.play("base:drop");
+                                }
+                            } else {
+                                state.alerts.push_back(
+                                    {"Inventory full", 0.0f, 1.5f, false});
+                            }
+                        } else if (best_kind == PickKind::Item) {
+                            auto& gi = state.ground_items.data()[best_index];
+                            // Stacking/insert logic for a single item instance
+                            std::string nm = "item";
+                            int maxc = 1;
+                            const ItemInstance* pick = state.items.get(gi.item_vid);
+                            if (g_lua_mgr && pick) {
+                                for (auto const& d : g_lua_mgr->items())
+                                    if (d.type == pick->def_type) {
+                                        nm = d.name;
+                                        maxc = d.max_count;
+                                        break;
+                                    }
+                            }
+                            bool fully_merged = false;
+                            if (pick) {
+                                for (auto& e : state.inventory.entries) {
+                                    if (e.kind != INV_ITEM)
+                                        continue;
+                                    ItemInstance* tgt = state.items.get(e.vid);
+                                    if (!tgt)
+                                        continue;
+                                    if (tgt->def_type != pick->def_type)
+                                        continue;
+                                    if (tgt->modifiers_hash != pick->modifiers_hash)
+                                        continue;
+                                    if (tgt->use_cooldown_countdown > 0.0f ||
+                                        pick->use_cooldown_countdown > 0.0f)
+                                        continue;
+                                    if (tgt->count >= (uint32_t)maxc)
+                                        continue;
+                                    uint32_t space = (uint32_t)maxc - tgt->count;
+                                    uint32_t xfer = std::min(space, pick->count);
+                                    tgt->count += xfer;
+                                    if (auto* pmut = state.items.get(gi.item_vid)) {
+                                        pmut->count -= xfer;
+                                    }
+                                    const ItemInstance* after = state.items.get(gi.item_vid);
+                                    if (!after || after->count == 0) {
+                                        state.items.free(gi.item_vid);
+                                        gi.active = false;
+                                        fully_merged = true;
                                         break;
                                     }
                                 }
-                        }
-                        for (auto& gi : state.ground_items.data())
-                            if (gi.active) {
-                                glm::vec2 gh = gi.size * 0.5f;
-                                float gl = gi.pos.x - gh.x, gr = gi.pos.x + gh.x;
-                                float gt = gi.pos.y - gh.y, gb = gi.pos.y + gh.y;
-                                bool overlap = !(pr <= gl || pl >= gr || pb <= gt || pt >= gb);
-                                if (overlap) {
-                                    // Auto-stack into existing if truly same (def_type +
-                                    // modifiers_hash) and capacity allows
-                                    std::string nm = "item";
-                                    int maxc = 1;
-                                    const ItemInstance* pick = state.items.get(gi.item_vid);
-                                    if (g_lua_mgr && pick) {
-                                        for (auto const& d : g_lua_mgr->items())
-                                            if (d.type == pick->def_type) {
-                                                nm = d.name;
-                                                maxc = d.max_count;
-                                                break;
-                                            }
-                                    }
-                                    bool fully_merged = false;
-                                    if (pick) {
-                                        for (auto& e : state.inventory.entries) {
-                                            if (e.kind != INV_ITEM)
-                                                continue;
-                                            ItemInstance* tgt = state.items.get(e.vid);
-                                            if (!tgt)
-                                                continue;
-                                            if (tgt->def_type != pick->def_type)
-                                                continue;
-                                            if (tgt->modifiers_hash != pick->modifiers_hash)
-                                                continue;
-                                            if (tgt->use_cooldown_countdown > 0.0f ||
-                                                pick->use_cooldown_countdown > 0.0f)
-                                                continue;
-                                            if (tgt->count >= (uint32_t)maxc)
-                                                continue;
-                                            uint32_t space = (uint32_t)maxc - tgt->count;
-                                            uint32_t xfer = std::min(space, pick->count);
-                                            tgt->count += xfer;
-                                            if (auto* pmut = state.items.get(gi.item_vid)) {
-                                                pmut->count -= xfer;
-                                            }
-                                            const ItemInstance* after =
-                                                state.items.get(gi.item_vid);
-                                            if (!after || after->count == 0) {
-                                                state.items.free(gi.item_vid);
-                                                gi.active = false;
-                                                fully_merged = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if (!fully_merged) {
-                                        bool ok =
-                                            state.inventory.insert_existing(INV_ITEM, gi.item_vid);
-                                        if (ok) {
-                                            gi.active = false;
-                                            if (pick) { // sound on pickup
-                                                const ItemDef* idf = nullptr;
-                                                if (g_lua_mgr) {
-                                                    for (auto const& d : g_lua_mgr->items())
-                                                        if (d.type == pick->def_type) {
-                                                            idf = &d;
-                                                            break;
-                                                        }
+                            }
+                            if (!fully_merged) {
+                                bool ok = state.inventory.insert_existing(INV_ITEM, gi.item_vid);
+                                if (ok) {
+                                    gi.active = false;
+                                    if (pick) { // sound on pickup
+                                        const ItemDef* idf = nullptr;
+                                        if (g_lua_mgr) {
+                                            for (auto const& d : g_lua_mgr->items())
+                                                if (d.type == pick->def_type) {
+                                                    idf = &d;
+                                                    break;
                                                 }
-                                                if (idf)
-                                                    sounds.play(idf->sound_pickup.empty()
-                                                                    ? "base:drop"
-                                                                    : idf->sound_pickup);
-                                                else
-                                                    sounds.play("base:drop");
-                                            }
-                                        } else {
-                                            state.alerts.push_back(
-                                                {std::string("Inventory full"), 0.0f, 1.5f, false});
                                         }
+                                        if (g_lua_mgr && state.player_vid) {
+                                            if (auto* plent = state.entities.get_mut(*state.player_vid))
+                                                g_lua_mgr->call_item_on_pickup(pick->def_type, state,
+                                                                              *plent);
+                                        }
+                                        if (idf)
+                                            sounds.play(idf->sound_pickup.empty() ? "base:drop"
+                                                                                   : idf->sound_pickup);
+                                        else
+                                            sounds.play("base:drop");
                                     }
-                                    if (!nm.empty())
-                                        state.alerts.push_back(
-                                            {std::string("Picked up ") + nm, 0.0f, 2.0f, false});
-                                    break;
+                                } else {
+                                    state.alerts.push_back(
+                                        {std::string("Inventory full"), 0.0f, 1.5f, false});
                                 }
                             }
+                            if (!nm.empty())
+                                state.alerts.push_back(
+                                    {std::string("Picked up ") + nm, 0.0f, 2.0f, false});
+                        }
                     }
                     // Simple separation to avoid intersecting ground items
                     for (auto& giA : state.ground_items.data())
@@ -770,6 +853,15 @@ init_ok:
                                                 pme->equipped_gun_vid.reset();
                                             }
                                         }
+                                        // Hook: on_drop for gun
+                                        if (g_lua_mgr && state.player_vid) {
+                                            if (const GunInstance* gi = state.guns.get(ent->vid)) {
+                                                if (auto* plent =
+                                                        state.entities.get_mut(*state.player_vid))
+                                                    g_lua_mgr->call_gun_on_drop(gi->def_type, state,
+                                                                               *plent);
+                                            }
+                                        }
                                         state.ground_guns.spawn(ent->vid, place_pos, gspr);
                                         state.inventory.remove_slot(idx);
                                         state.alerts.push_back(
@@ -806,10 +898,24 @@ init_ok:
                                                 tmp.consume_on_use = consume;
                                                 tmp.category = category;
                                                 auto newv = state.items.spawn_from_def(tmp, 1);
-                                                if (newv)
+                                                if (newv) {
+                                                    // Hook: on_drop for item (split)
+                                                    if (g_lua_mgr && state.player_vid) {
+                                                        if (auto* plent = state.entities.get_mut(
+                                                                *state.player_vid))
+                                                            g_lua_mgr->call_item_on_drop(
+                                                                def_type, state, *plent);
+                                                    }
                                                     state.ground_items.spawn(*newv, place_pos);
+                                                }
                                             } else {
                                                 // move the instance itself
+                                                if (g_lua_mgr && state.player_vid) {
+                                                    if (auto* plent = state.entities.get_mut(
+                                                            *state.player_vid))
+                                                        g_lua_mgr->call_item_on_drop(
+                                                            def_type, state, *plent);
+                                                }
                                                 state.ground_items.spawn(ent->vid, place_pos);
                                                 state.inventory.remove_slot(idx);
                                             }
@@ -1026,6 +1132,44 @@ init_ok:
                                                 }
                                             }
                                         }
+                                    } else if (!gim->ar_consumed) {
+                                        // Failure: lock out further attempts this reload
+                                        gim->ar_consumed = true;
+                                        gim->ar_failed_attempt = true;
+                                        state.reload_bar_shake =
+                                            std::max(state.reload_bar_shake, 6.0f);
+                                        state.alerts.push_back(
+                                            {"Active Reload Failed", 0.0f, 0.7f, false});
+                                        if (g_lua_mgr) {
+                                            g_lua_mgr->call_on_failed_active_reload(state, *plm);
+                                            g_lua_mgr->call_gun_on_failed_active_reload(
+                                                gim->def_type, state, *plm);
+                                            for (const auto& entry : state.inventory.entries) {
+                                                if (entry.kind == INV_ITEM) {
+                                                    if (const ItemInstance* inst =
+                                                            state.items.get(entry.vid)) {
+                                                        g_lua_mgr->call_item_on_failed_active_reload(
+                                                            inst->def_type, state, *plm);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else if (gim->ar_consumed && gim->ar_failed_attempt) {
+                                        // Already failed this reload; notify hook when trying again
+                                        if (g_lua_mgr) {
+                                            g_lua_mgr->call_on_tried_after_failed_ar(state, *plm);
+                                            g_lua_mgr->call_gun_on_tried_after_failed_ar(
+                                                gim->def_type, state, *plm);
+                                            for (const auto& entry : state.inventory.entries) {
+                                                if (entry.kind == INV_ITEM) {
+                                                    if (const ItemInstance* inst =
+                                                            state.items.get(entry.vid)) {
+                                                        g_lua_mgr->call_item_on_tried_after_failed_ar(
+                                                            inst->def_type, state, *plm);
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 } else if (gim->ammo_reserve > 0) {
                                     int dropped = gim->current_mag;
@@ -1056,6 +1200,7 @@ init_ok:
                                     gim->ar_window_start = start;
                                     gim->ar_window_end = start + size;
                                     gim->ar_consumed = false;
+                                    gim->ar_failed_attempt = false;
                                     sounds.play(gd->sound_reload.empty() ? "base:reload"
                                                                          : gd->sound_reload);
                                 } else {
@@ -1510,15 +1655,61 @@ init_ok:
                 }
             }
 
-            // on_tick triggers for items (player only) per fixed step
+            // After-physics ticking (opt-in)
             if (state.player_vid && g_lua_mgr) {
-                auto* pl = state.entities.get_mut(*state.player_vid);
-                if (pl) {
+                Entity* plat = state.entities.get_mut(*state.player_vid);
+                if (plat) {
+                    const float dt = TIMESTEP;
+                    const int MAX_TICKS = 4000;
+                    int tick_calls = 0;
+                    // Guns with on_step
                     for (const auto& entry : state.inventory.entries) {
-                        if (entry.kind == INV_ITEM) {
-                            if (const ItemInstance* inst = state.items.get(entry.vid)) {
-                                g_lua_mgr->call_item_on_tick(inst->def_type, state, *pl, TIMESTEP);
+                        if (entry.kind != INV_GUN)
+                            continue;
+                        GunInstance* gi = state.guns.get(entry.vid);
+                        if (!gi)
+                            continue;
+                        const GunDef* gd = nullptr;
+                        for (auto const& g : g_lua_mgr->guns())
+                            if (g.type == gi->def_type) {
+                                gd = &g;
+                                break;
                             }
+                        if (!gd || gd->on_step_ref < 0)
+                            continue;
+                        if (gd->tick_rate_hz <= 0.0f || gd->tick_phase == "before")
+                            continue;
+                        gi->tick_acc += dt;
+                        float period = 1.0f / std::max(1.0f, gd->tick_rate_hz);
+                        while (gi->tick_acc >= period && tick_calls < MAX_TICKS) {
+                            g_lua_mgr->call_gun_on_step(gi->def_type, state, *plat);
+                            gi->tick_acc -= period;
+                            ++tick_calls;
+                        }
+                    }
+                    // Items with on_tick
+                    for (const auto& entry : state.inventory.entries) {
+                        if (entry.kind != INV_ITEM)
+                            continue;
+                        ItemInstance* inst = state.items.get(entry.vid);
+                        if (!inst)
+                            continue;
+                        const ItemDef* idf = nullptr;
+                        for (auto const& d : g_lua_mgr->items())
+                            if (d.type == inst->def_type) {
+                                idf = &d;
+                                break;
+                            }
+                        if (!idf || idf->on_tick_ref < 0)
+                            continue;
+                        if (idf->tick_rate_hz <= 0.0f || idf->tick_phase == "before")
+                            continue;
+                        inst->tick_acc += dt;
+                        float period = 1.0f / std::max(1.0f, idf->tick_rate_hz);
+                        while (inst->tick_acc >= period && tick_calls < MAX_TICKS) {
+                            g_lua_mgr->call_item_on_tick(inst->def_type, state, *plat, period);
+                            inst->tick_acc -= period;
+                            ++tick_calls;
                         }
                     }
                 }
@@ -1862,14 +2053,23 @@ init_ok:
                 ratio = std::clamp(ratio, 0.0f, 1.0f);
                 int hw = (int)std::lround((double)w * (double)ratio);
                 SDL_Rect hr{bg.x, bg.y, hw, bg.h};
+                // Optional shield indicator as thin cyan band
+                if (e.stats.shield_max > 0.0f && e.shield > 0.0f) {
+                    float sratio = std::clamp(e.shield / e.stats.shield_max, 0.0f, 1.0f);
+                    int sw = (int)std::lround((double)w * (double)sratio);
+                    int sh = std::max(2, h / 3);
+                    SDL_Rect sb{bg.x, bg.y + 1, sw, sh};
+                    SDL_SetRenderDrawColor(renderer, 120, 200, 240, 160);
+                    SDL_RenderFillRect(renderer, &sb);
+                }
                 SDL_SetRenderDrawColor(renderer, 220, 60, 60, 230);
                 SDL_RenderFillRect(renderer, &hr);
-                // plates as thin slivers to the right of health segment
-                int px0 = bg.x + hr.w;
+                // plates as thin slivers aligned from right edge
                 int slw = 2;
                 int gap = 1;
                 for (int i = 0; i < e.stats.plates; ++i) {
-                    SDL_Rect pr{px0 + i * (slw + gap), bg.y, slw, bg.h};
+                    int rx = bg.x + w - (i + 1) * (slw + gap);
+                    SDL_Rect pr{rx, bg.y, slw, bg.h};
                     SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
                     SDL_RenderFillRect(renderer, &pr);
                     SDL_SetRenderDrawColor(renderer, 120, 120, 120, 255);
@@ -1894,11 +2094,22 @@ init_ok:
             for (auto const& pu : state.pickups.data())
                 if (pu.active) {
                     SDL_FPoint c = world_to_screen(pu.pos.x - 0.125f, pu.pos.y - 0.125f);
-                    float s = TILE_SIZE * gfx.play_cam.zoom * 0.25f;
+                    float s = TILE_SIZE * gfx.play_cam.zoom * 0.20f;
                     SDL_Rect r{(int)std::floor(c.x), (int)std::floor(c.y), (int)std::ceil(s),
                                (int)std::ceil(s)};
-                    if (pu.sprite_id >= 0) {
-                        if (SDL_Texture* tex = textures.get(pu.sprite_id))
+                    int sid = pu.sprite_id;
+                    if (sid < 0 && g_lua_mgr && g_sprite_ids) {
+                        // resolve sprite from powerup def
+                        for (auto const& pd : g_lua_mgr->powerups())
+                            if ((int)pd.type == (int)pu.type) {
+                                if (!pd.sprite.empty() &&
+                                    pd.sprite.find(':') != std::string::npos)
+                                    sid = g_sprite_ids->try_get(pd.sprite);
+                                break;
+                            }
+                    }
+                    if (sid >= 0) {
+                        if (SDL_Texture* tex = textures.get(sid))
                             SDL_RenderCopy(renderer, tex, nullptr, &r);
                         else
                             add_warning("Missing texture for powerup sprite");
@@ -1950,42 +2161,7 @@ init_ok:
                         SDL_SetRenderDrawColor(renderer, 80, 220, 240, 255);
                         SDL_RenderFillRect(renderer, &r);
                     }
-                    if (pdraw) {
-                        glm::vec2 gh = gi.size * 0.5f;
-                        float gl = gi.pos.x - gh.x, gr = gi.pos.x + gh.x;
-                        float gt = gi.pos.y - gh.y, gb = gi.pos.y + gh.y;
-                        bool overlap = !(pr <= gl || pl >= gr || pb <= gt || pt >= gb);
-                        if (overlap) {
-                            SDL_SetRenderDrawColor(renderer, 240, 220, 80, 255);
-                            SDL_RenderDrawRect(renderer, &r);
-                            if (ui_font) {
-                                std::string nm = "item";
-                                if (g_lua_mgr) {
-                                    const ItemInstance* inst = state.items.get(gi.item_vid);
-                                    if (inst) {
-                                        for (auto const& d : g_lua_mgr->items())
-                                            if (d.type == inst->def_type) {
-                                                nm = d.name;
-                                                break;
-                                            }
-                                    }
-                                }
-                                std::string prompt = std::string("Press F to pick up ") + nm;
-                                SDL_Color col{250, 250, 250, 255};
-                                SDL_Surface* s =
-                                    TTF_RenderUTF8_Blended(ui_font, prompt.c_str(), col);
-                                if (s) {
-                                    SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s);
-                                    int tw = 0, th = 0;
-                                    SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                                    SDL_Rect d{r.x, r.y - th - 2, tw, th};
-                                    SDL_RenderCopy(renderer, t, nullptr, &d);
-                                    SDL_DestroyTexture(t);
-                                    SDL_FreeSurface(s);
-                                }
-                            }
-                        }
-                    }
+                    // outline handled in consolidated best-overlap block
                 }
             // draw ground guns (magenta if no sprite)
             for (auto const& gg : state.ground_guns.data())
@@ -1996,8 +2172,21 @@ init_ok:
                     SDL_Rect r{(int)std::floor(c.x), (int)std::floor(c.y),
                                (int)std::ceil(gg.size.x * scale),
                                (int)std::ceil(gg.size.y * scale)};
-                    if (gg.sprite_id >= 0) {
-                        if (SDL_Texture* tex = textures.get(gg.sprite_id))
+                    int sid = gg.sprite_id;
+                    if (sid < 0 && g_lua_mgr && g_sprite_ids) {
+                        if (const GunInstance* gi = state.guns.get(gg.gun_vid)) {
+                            const GunDef* gd = nullptr;
+                            for (auto const& g : g_lua_mgr->guns())
+                                if (g.type == gi->def_type) {
+                                    gd = &g;
+                                    break;
+                                }
+                            if (gd && !gd->sprite.empty() && gd->sprite.find(':') != std::string::npos)
+                                sid = g_sprite_ids->try_get(gd->sprite);
+                        }
+                    }
+                    if (sid >= 0) {
+                        if (SDL_Texture* tex = textures.get(sid))
                             SDL_RenderCopy(renderer, tex, nullptr, &r);
                         else
                             add_warning("Missing texture for gun sprite");
@@ -2007,6 +2196,114 @@ init_ok:
                         SDL_RenderFillRect(renderer, &r);
                     }
                 }
+            // Consolidated pickup prompt: show only for the most-overlapped target
+            if (pdraw && ui_font) {
+                enum class PK { None, Gun, Item };
+                PK best_kind = PK::None;
+                std::size_t best_idx = (std::size_t)-1;
+                float best_area = 0.0f;
+                auto overlap_area = [&](float al, float at, float ar, float ab, float bl, float bt,
+                                       float br, float bb) {
+                    float xl = std::max(al, bl);
+                    float xr = std::min(ar, br);
+                    float yt = std::max(at, bt);
+                    float yb = std::min(ab, bb);
+                    float w = xr - xl;
+                    float h = yb - yt;
+                    if (w <= 0.0f || h <= 0.0f)
+                        return 0.0f;
+                    return w * h;
+                };
+                for (std::size_t i = 0; i < state.ground_guns.data().size(); ++i) {
+                    auto const& gg = state.ground_guns.data()[i];
+                    if (!gg.active)
+                        continue;
+                    glm::vec2 gh = gg.size * 0.5f;
+                    float gl = gg.pos.x - gh.x, gr = gg.pos.x + gh.x;
+                    float gt = gg.pos.y - gh.y, gb = gg.pos.y + gh.y;
+                    float area_g = overlap_area(pl, pt, pr, pb, gl, gt, gr, gb);
+                    if (area_g > best_area) {
+                        best_area = area_g;
+                        best_kind = PK::Gun;
+                        best_idx = i;
+                    }
+                }
+                for (std::size_t i = 0; i < state.ground_items.data().size(); ++i) {
+                    auto const& gi = state.ground_items.data()[i];
+                    if (!gi.active)
+                        continue;
+                    glm::vec2 gh = gi.size * 0.5f;
+                    float gl = gi.pos.x - gh.x, gr = gi.pos.x + gh.x;
+                    float gt = gi.pos.y - gh.y, gb = gi.pos.y + gh.y;
+                    float area_i = overlap_area(pl, pt, pr, pb, gl, gt, gr, gb);
+                    if (area_i > best_area) {
+                        best_area = area_i;
+                        best_kind = PK::Item;
+                        best_idx = i;
+                    }
+                }
+                if (best_area > 0.0f) {
+                    std::string nm;
+                    SDL_Rect r{0, 0, 0, 0};
+                    if (best_kind == PK::Item) {
+                        auto const& gi = state.ground_items.data()[best_idx];
+                        // screen rect for item
+                        SDL_FPoint c = world_to_screen(gi.pos.x - gi.size.x * 0.5f,
+                                                       gi.pos.y - gi.size.y * 0.5f);
+                        float scale = TILE_SIZE * gfx.play_cam.zoom;
+                        r = SDL_Rect{(int)std::floor(c.x), (int)std::floor(c.y),
+                                     (int)std::ceil(gi.size.x * scale),
+                                     (int)std::ceil(gi.size.y * scale)};
+                        nm = "item";
+                        if (g_lua_mgr) {
+                            const ItemInstance* inst = state.items.get(gi.item_vid);
+                            if (inst) {
+                                for (auto const& d : g_lua_mgr->items())
+                                    if (d.type == inst->def_type) {
+                                        nm = d.name;
+                                        break;
+                                    }
+                            }
+                        }
+                    } else if (best_kind == PK::Gun) {
+                        auto const& gg = state.ground_guns.data()[best_idx];
+                        SDL_FPoint c = world_to_screen(gg.pos.x - gg.size.x * 0.5f,
+                                                       gg.pos.y - gg.size.y * 0.5f);
+                        float scale = TILE_SIZE * gfx.play_cam.zoom;
+                        r = SDL_Rect{(int)std::floor(c.x), (int)std::floor(c.y),
+                                     (int)std::ceil(gg.size.x * scale),
+                                     (int)std::ceil(gg.size.y * scale)};
+                        nm = "gun";
+                        if (g_lua_mgr) {
+                            if (const GunInstance* gi = state.guns.get(gg.gun_vid)) {
+                                for (auto const& g : g_lua_mgr->guns())
+                                    if (g.type == gi->def_type) {
+                                        nm = g.name;
+                                        break;
+                                    }
+                            }
+                        }
+                    }
+                    // Outline highlight for the best candidate
+                    SDL_SetRenderDrawColor(renderer, 240, 220, 80, 255);
+                    SDL_RenderDrawRect(renderer, &r);
+                    const char* keyname = SDL_GetScancodeName(binds.pick_up);
+                    if (!keyname || !*keyname)
+                        keyname = "F";
+                    std::string prompt = std::string("Press ") + keyname + " to pick up " + nm;
+                    SDL_Color col{250, 250, 250, 255};
+                    SDL_Surface* s = TTF_RenderUTF8_Blended(ui_font, prompt.c_str(), col);
+                    if (s) {
+                        SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s);
+                        int tw = 0, th = 0;
+                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                        SDL_Rect d{r.x, r.y - th - 2, tw, th};
+                        SDL_RenderCopy(renderer, t, nullptr, &d);
+                        SDL_DestroyTexture(t);
+                        SDL_FreeSurface(s);
+                    }
+                }
+            }
             // draw projectiles (prefer sprite; fallback to red rect)
             for (auto const& proj : projectiles.items)
                 if (proj.active) {
@@ -2084,6 +2381,16 @@ init_ok:
                                 int gap = 2;
                                 int rx = mx + 16;
                                 int ry = my - bar_h / 2;
+                                if (state.reload_bar_shake > 0.01f) {
+                                    static thread_local std::mt19937 rng{std::random_device{}()};
+                                    std::uniform_real_distribution<float> J(-state.reload_bar_shake,
+                                                                            state.reload_bar_shake);
+                                    rx += (int)std::lround(J(rng));
+                                    ry += (int)std::lround(J(rng));
+                                    state.reload_bar_shake *= 0.90f;
+                                } else {
+                                    state.reload_bar_shake = 0.0f;
+                                }
                                 float mag_ratio =
                                     (gd->mag > 0) ? (float)gi->current_mag / (float)gd->mag : 0.0f;
                                 float res_ratio = (gd->ammo_max > 0) ? (float)gi->ammo_reserve /
@@ -2127,7 +2434,11 @@ init_ok:
                                                                         (double)(1.0f - ws));
                                         SDL_Rect win{rx - 2, wy0, bar_w + 6,
                                                      std::max(2, wy1 - wy0)};
-                                        SDL_SetRenderDrawColor(renderer, 240, 220, 80, 120);
+                                        bool lockout = (gi->ar_consumed && gi->ar_failed_attempt);
+                                        if (lockout)
+                                            SDL_SetRenderDrawColor(renderer, 120, 120, 120, 140);
+                                        else
+                                            SDL_SetRenderDrawColor(renderer, 240, 220, 80, 120);
                                         SDL_RenderFillRect(renderer, &win);
                                         // progress rectangle grows from bottom of bar
                                         int prg_h = (int)std::lround((double)bar_h *
@@ -2135,7 +2446,12 @@ init_ok:
                                         if (prg_h > 0) {
                                             SDL_Rect prog{rx - 2, ry + (bar_h - prg_h), bar_w + 6,
                                                           prg_h};
-                                            SDL_SetRenderDrawColor(renderer, 200, 240, 255, 200);
+                                            if (lockout)
+                                                SDL_SetRenderDrawColor(renderer, 110, 110, 120,
+                                                                       220);
+                                            else
+                                                SDL_SetRenderDrawColor(renderer, 200, 240, 255,
+                                                                       200);
                                             SDL_RenderFillRect(renderer, &prog);
                                         }
                                     }
@@ -2489,6 +2805,11 @@ init_ok:
                             std::string nm = "gun";
                             float dmg = 0.0f, rpm = 0.0f;
                             int mag = 0, maxmag = 0, ammo_res = 0;
+                            std::string fire_mode = "auto";
+                            int burst_count = 0;
+                            float burst_rpm = 0.0f;
+                            float shot_interval = 0.0f;
+                            float burst_interval = 0.0f;
                             if (g_lua_mgr) {
                                 for (auto const& g : g_lua_mgr->guns())
                                     if (g.type == gi->def_type) {
@@ -2496,6 +2817,11 @@ init_ok:
                                         dmg = g.damage;
                                         rpm = g.rpm;
                                         maxmag = g.mag;
+                                        fire_mode = g.fire_mode;
+                                        burst_count = g.burst_count;
+                                        burst_rpm = g.burst_rpm;
+                                        shot_interval = g.shot_interval;
+                                        burst_interval = g.burst_interval;
                                         break;
                                     }
                             }
@@ -2505,6 +2831,35 @@ init_ok:
                             draw_txt(std::string("DMG/RPM: ") + std::to_string((int)dmg) + "/" +
                                          std::to_string((int)rpm),
                                      SDL_Color{220, 220, 220, 255});
+                            // Timings
+                            if (rpm > 0.0f || shot_interval > 0.0f) {
+                                float dt = shot_interval > 0.0f ? shot_interval : (60.0f / std::max(1.0f, rpm));
+                                int ms = (int)std::lround(dt * 1000.0f);
+                                draw_txt(std::string("Shot Time: ") + std::to_string(ms) + " ms",
+                                         SDL_Color{220, 220, 220, 255});
+                            }
+                            if (fire_mode == "burst" && (burst_rpm > 0.0f || burst_interval > 0.0f)) {
+                                draw_txt(std::string("Burst RPM: ") + std::to_string((int)std::lround(burst_rpm)),
+                                         SDL_Color{220, 220, 220, 255});
+                                float bdt = burst_interval > 0.0f ? burst_interval : (burst_rpm > 0.0f ? 60.0f / burst_rpm : 0.0f);
+                                if (bdt > 0.0f) {
+                                    int bms = (int)std::lround(bdt * 1000.0f);
+                                    draw_txt(std::string("Burst Time: ") + std::to_string(bms) + " ms",
+                                             SDL_Color{220, 220, 220, 255});
+                                }
+                            }
+                            // Fire mode label
+                            {
+                                std::string fm_label = "Auto";
+                                if (fire_mode == "single")
+                                    fm_label = "Semi";
+                                else if (fire_mode == "burst") {
+                                    fm_label = "Burst";
+                                    if (burst_count > 0)
+                                        fm_label += std::string(" (") + std::to_string(burst_count) + ")";
+                                }
+                                draw_txt(std::string("Fire: ") + fm_label, SDL_Color{220, 220, 220, 255});
+                            }
                             draw_txt(std::string("Mag: ") + std::to_string(mag) + "/" +
                                          std::to_string(maxmag),
                                      SDL_Color{220, 220, 220, 255});
@@ -2533,7 +2888,7 @@ init_ok:
                         int panel_w = (int)std::lround(width * 0.26);
                         int px = width - panel_w - 30;
                         int py = (int)std::lround(height * 0.30);
-                        SDL_Rect box{px, py, panel_w, 180};
+                        SDL_Rect box{px, py, panel_w, 220};
                         SDL_SetRenderDrawColor(renderer, 25, 25, 30, 220);
                         SDL_RenderFillRect(renderer, &box);
                         SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255);
@@ -2560,6 +2915,35 @@ init_ok:
                                  SDL_Color{220, 220, 220, 255});
                         draw_txt(std::string("RPM: ") + std::to_string((int)std::lround(gd->rpm)),
                                  SDL_Color{220, 220, 220, 255});
+                        // Timings
+                        if (gd->rpm > 0.0f || gd->shot_interval > 0.0f) {
+                            float dt = gd->shot_interval > 0.0f ? gd->shot_interval : (60.0f / std::max(1.0f, gd->rpm));
+                            int ms = (int)std::lround(dt * 1000.0f);
+                            draw_txt(std::string("Shot Time: ") + std::to_string(ms) + " ms",
+                                     SDL_Color{220, 220, 220, 255});
+                        }
+                        if (gd->fire_mode == std::string("burst") && (gd->burst_rpm > 0.0f || gd->burst_interval > 0.0f)) {
+                            draw_txt(std::string("Burst RPM: ") + std::to_string((int)std::lround(gd->burst_rpm)),
+                                     SDL_Color{220, 220, 220, 255});
+                            float bdt = gd->burst_interval > 0.0f ? gd->burst_interval : (gd->burst_rpm > 0.0f ? 60.0f / gd->burst_rpm : 0.0f);
+                            if (bdt > 0.0f) {
+                                int bms = (int)std::lround(bdt * 1000.0f);
+                                draw_txt(std::string("Burst Time: ") + std::to_string(bms) + " ms",
+                                         SDL_Color{220, 220, 220, 255});
+                            }
+                        }
+                        // Fire mode label
+                        {
+                            std::string fm_label = "Auto";
+                            if (gd->fire_mode == "single")
+                                fm_label = "Semi";
+                            else if (gd->fire_mode == "burst") {
+                                fm_label = "Burst";
+                                if (gd->burst_count > 0)
+                                    fm_label += std::string(" (") + std::to_string(gd->burst_count) + ")";
+                            }
+                            draw_txt(std::string("Fire: ") + fm_label, SDL_Color{220, 220, 220, 255});
+                        }
                         draw_txt(std::string("Recoil: ") + std::to_string(gd->recoil),
                                  SDL_Color{220, 220, 220, 255});
                         draw_txt(std::string("Control: ") + std::to_string(gd->control),
@@ -2575,73 +2959,124 @@ init_ok:
                 }
             }
 
-            // Bottom player condition bar (health, plates, shield, dash stocks)
+            // Bottom player condition bars (shield, plates, health) with numbers and fixed width
             if (ui_font && state.player_vid) {
                 const Entity* p = state.entities.get(*state.player_vid);
                 if (p) {
-                    int bw = std::max(300, width - 800); // adaptive width
-                    int bh = 18;
-                    int bx = (width - bw) / 2;
-                    int by = height - bh - 20;
+                    int group_w = std::max(200, (int)std::lround(width * 0.25));
+                    int bar_h = 16;
+                    int gap_y = 6;
+                    int total_h = bar_h * 3 + gap_y * 2;
+                    int gx = (width - group_w) / 2;
+                    int gy = height - total_h - 28;
                     if (state.hp_bar_shake > 0.01f) {
                         static thread_local std::mt19937 rng{std::random_device{}()};
                         std::uniform_real_distribution<float> J(-state.hp_bar_shake,
                                                                 state.hp_bar_shake);
-                        bx += (int)std::lround(J(rng));
-                        by += (int)std::lround(J(rng));
+                        gx += (int)std::lround(J(rng));
+                        gy += (int)std::lround(J(rng));
                         state.hp_bar_shake *= 0.90f;
                     } else {
                         state.hp_bar_shake = 0.0f;
                     }
-                    // background
-                    SDL_Rect bg{bx, by, bw, bh};
-                    SDL_SetRenderDrawColor(renderer, 20, 20, 24, 220);
-                    SDL_RenderFillRect(renderer, &bg);
-                    SDL_SetRenderDrawColor(renderer, 60, 60, 70, 255);
-                    SDL_RenderDrawRect(renderer, &bg);
-                    // health (red)
-                    float hratio = 0.0f;
-                    if (p->max_hp > 0)
-                        hratio = (float)p->health / (float)p->max_hp;
-                    hratio = std::clamp(hratio, 0.0f, 1.0f);
-                    int hw = (int)std::lround((double)bw * (double)hratio);
-                    SDL_Rect hr{bx, by, hw, bh};
-                    SDL_SetRenderDrawColor(renderer, 220, 60, 60, 230);
-                    SDL_RenderFillRect(renderer, &hr);
-                    // plates as grey slivers after health
-                    int px0 = bx + hw;
-                    int slw = 4;
-                    int gap = 2;
-                    for (int i = 0; i < p->stats.plates; ++i) {
-                        SDL_Rect prr{px0 + i * (slw + gap), by, slw, bh};
-                        SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
-                        SDL_RenderFillRect(renderer, &prr);
-                        SDL_SetRenderDrawColor(renderer, 120, 120, 120, 255);
-                        SDL_RenderDrawRect(renderer, &prr);
-                    }
-                    // shield (cyan) after plates
-                    if (p->stats.shield_max > 0.0f && p->shield > 0.0f) {
-                        float sratio = std::clamp(p->shield / p->stats.shield_max, 0.0f, 1.0f);
-                        int sw = (int)std::lround((double)bw * (double)sratio);
-                        SDL_Rect sr{px0 + p->stats.plates * (slw + gap), by, sw, bh};
-                        SDL_SetRenderDrawColor(renderer, 120, 200, 240, 220);
-                        SDL_RenderFillRect(renderer, &sr);
-                    }
-                    // dash stocks: boxes with 2:1 width:height to the right of bar
-                    int dx0 = bx + bw + 8;
-                    int ds_h = std::max(6, bh - 6);
-                    int ds_w = ds_h * 2;
-                    int dg = 4;
-                    for (int i = 0; i < state.dash_max; ++i) {
-                        SDL_Rect db{dx0 + i * (ds_w + dg), by + (bh - ds_h) / 2, ds_w, ds_h};
-                        if (i < state.dash_stocks) {
-                            SDL_SetRenderDrawColor(renderer, 120, 200, 240, 230);
-                        } else {
-                            SDL_SetRenderDrawColor(renderer, 40, 60, 70, 200);
+                    auto draw_num = [&](const std::string& s, int x, int y, SDL_Color col) {
+                        SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, s.c_str(), col);
+                        if (!srf)
+                            return SDL_Point{x, y};
+                        SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, srf);
+                        int tw = 0, th = 0;
+                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                        SDL_Rect d{x, y + (bar_h - th) / 2, tw, th};
+                        SDL_RenderCopy(renderer, t, nullptr, &d);
+                        SDL_DestroyTexture(t);
+                        SDL_FreeSurface(srf);
+                        return SDL_Point{d.x + d.w, d.y + d.h};
+                    };
+                    auto draw_bar = [&](int x, int y, int w, int h, float ratio, SDL_Color fill) {
+                        SDL_Rect bg{x, y, w, h};
+                        SDL_SetRenderDrawColor(renderer, 20, 20, 24, 220);
+                        SDL_RenderFillRect(renderer, &bg);
+                        SDL_SetRenderDrawColor(renderer, 60, 60, 70, 255);
+                        SDL_RenderDrawRect(renderer, &bg);
+                        double r = (double)std::clamp(ratio, 0.0f, 1.0f);
+                        int fw = (int)std::lround((double)w * r);
+                        if (fw > 0) {
+                            SDL_Rect fr{x, y, fw, h};
+                            SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, fill.a);
+                            SDL_RenderFillRect(renderer, &fr);
                         }
-                        SDL_RenderFillRect(renderer, &db);
-                        SDL_SetRenderDrawColor(renderer, 20, 30, 40, 255);
-                        SDL_RenderDrawRect(renderer, &db);
+                    };
+                    SDL_Color white{240, 240, 240, 255};
+                    // Shield (top)
+                    if (p->stats.shield_max > 0.0f) {
+                        float sratio = (p->stats.shield_max > 0.0f)
+                                           ? (p->shield / p->stats.shield_max)
+                                           : 0.0f;
+                        draw_bar(gx, gy, group_w, bar_h, sratio,
+                                 SDL_Color{120, 200, 240, 220});
+                        // Numbers: left current, right max
+                        draw_num(std::to_string((int)std::lround(p->shield)), gx - 46, gy, white);
+                        draw_num(std::to_string((int)std::lround(p->stats.shield_max)),
+                                 gx + group_w + 6, gy, white);
+                    }
+                    // Plates (middle)
+                    int gy2 = gy + bar_h + gap_y;
+                    {
+                        // Background only; fill with slivers up to 20
+                        draw_bar(gx, gy2, group_w, bar_h, 0.0f, SDL_Color{0, 0, 0, 0});
+                        int to_show = std::min(20, p->stats.plates);
+                        int slw = 6;
+                        int gap = 2;
+                        int all_w = to_show > 0 ? to_show * slw + (to_show - 1) * gap : 0;
+                        int start_x = gx + (group_w - all_w) / 2;
+                        for (int i = 0; i < to_show; ++i) {
+                            SDL_Rect prr{start_x + i * (slw + gap), gy2 + 2, slw, bar_h - 4};
+                            SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
+                            SDL_RenderFillRect(renderer, &prr);
+                            SDL_SetRenderDrawColor(renderer, 140, 140, 140, 255);
+                            SDL_RenderDrawRect(renderer, &prr);
+                        }
+                        // Current plates count on left
+                        draw_num(std::to_string(p->stats.plates), gx - 46, gy2, white);
+                    }
+                    // Health (bottom)
+                    int gy3 = gy2 + bar_h + gap_y;
+                    {
+                        float hratio = (p->max_hp > 0) ? ((float)p->health / (float)p->max_hp)
+                                                       : 0.0f;
+                        draw_bar(gx, gy3, group_w, bar_h, hratio, SDL_Color{220, 60, 60, 230});
+                        draw_num(std::to_string((int)p->health), gx - 46, gy3, white);
+                        draw_num(std::to_string((int)p->max_hp), gx + group_w + 6, gy3, white);
+                    }
+                    // Dash (bottom-most bar) with small sliver sections and refill sliver above
+                    int gy4 = gy3 + bar_h + gap_y;
+                    // background bar
+                    draw_bar(gx, gy4, group_w, bar_h, 0.0f, SDL_Color{0, 0, 0, 0});
+                    if (state.dash_max > 0) {
+                        int segs = state.dash_max;
+                        int slw = 6;
+                        int sgap = 2;
+                        int start_x = gx; // left-aligned slivers
+                        for (int i = 0; i < segs; ++i) {
+                            int sx = start_x + i * (slw + sgap);
+                            SDL_Rect seg{sx, gy4 + 2, slw, bar_h - 4};
+                            if (i < state.dash_stocks)
+                                SDL_SetRenderDrawColor(renderer, 80, 200, 120, 220);
+                            else
+                                SDL_SetRenderDrawColor(renderer, 40, 60, 70, 200);
+                            SDL_RenderFillRect(renderer, &seg);
+                            SDL_SetRenderDrawColor(renderer, 20, 30, 40, 255);
+                            SDL_RenderDrawRect(renderer, &seg);
+                        }
+                        // Refill progress sliver (only when below max)
+                        if (state.dash_stocks < state.dash_max) {
+                            double pratio = std::clamp((double)(state.dash_refill_timer / DASH_COOLDOWN_SECONDS), 0.0, 1.0);
+                            int pw = (int)std::lround((double)group_w * pratio);
+                            int psl = std::max(2, bar_h / 4);
+                            SDL_Rect pbar{gx, gy4 - (psl + 2), pw, psl};
+                            SDL_SetRenderDrawColor(renderer, 90, 200, 160, 200);
+                            SDL_RenderFillRect(renderer, &pbar);
+                        }
                     }
                 }
             }

@@ -24,6 +24,11 @@ register_gun{ name = "Pistol", type = 200, damage = 20, rpm = 350, recoil = 0.5,
 register_gun{ name = "Rifle", type = 201, damage = 15, rpm = 650, recoil = 0.9, control = 0.7, mag = 30, ammo_max = 240, sprite="base:rifle", jam_chance=0.005, projectile_type=1,
   fire_mode="auto", sound_fire="base:medium_shoot", sound_reload="base:reload", sound_jam="base:ui_cant", sound_pickup="base:drop" }
 
+-- Semi-auto 5-shot burst variant for testing
+register_gun{ name = "Burst Rifle", type = 202, damage = 15, rpm = 600, recoil = 0.9, control = 0.7, mag = 30, ammo_max = 240, sprite="base:rifle", jam_chance=0.005, projectile_type=1,
+  fire_mode="burst", burst_count=5, burst_rpm=1100, shot_interval=0.10, burst_interval=0.0545,
+  sound_fire="base:medium_shoot", sound_reload="base:reload", sound_jam="base:ui_cant", sound_pickup="base:drop" }
+
 -- Optional drop tables
 drops = {
   powerups = {
@@ -38,6 +43,7 @@ drops = {
   guns = {
     { type = 200, weight = 1.0 },
     { type = 201, weight = 0.7 },
+    { type = 202, weight = 0.6 },
   }
 }
 

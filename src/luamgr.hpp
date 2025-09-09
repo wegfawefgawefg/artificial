@@ -26,11 +26,18 @@ struct ItemDef {
     std::string desc;
     std::string sound_use;
     std::string sound_pickup;
+    // Optional ticking (opt-in)
+    float tick_rate_hz{0.0f};
+    std::string tick_phase; // "before" or "after" (default after)
     int on_use_ref{-1}; // Lua registry ref to on_use function (optional)
     int on_tick_ref{-1};
     int on_shoot_ref{-1};
     int on_damage_ref{-1};
     int on_active_reload_ref{-1};
+    int on_failed_active_reload_ref{-1};
+    int on_tried_after_failed_ar_ref{-1};
+    int on_pickup_ref{-1};
+    int on_drop_ref{-1};
     int on_eject_ref{-1};
     int on_reload_start_ref{-1};
     int on_reload_finish_ref{-1};
@@ -55,6 +62,9 @@ struct GunDef {
     std::string fire_mode;  // "auto", "single", or "burst"
     int burst_count{0};
     float burst_rpm{0.0f};
+    // Optional explicit intervals (seconds). When 0, derived from RPM.
+    float shot_interval{0.0f};
+    float burst_interval{0.0f};
     float reload_time{1.0f};
     float eject_time{0.2f};
     // Active reload window definition
@@ -64,6 +74,14 @@ struct GunDef {
     float ar_size_variance{0.0f};     // +/- variance applied to size
     float active_reload_window{0.0f}; // legacy fallback for ar_size when >0
     int on_active_reload_ref{-1};
+    int on_failed_active_reload_ref{-1};
+    int on_tried_after_failed_ar_ref{-1};
+    int on_pickup_ref{-1};
+    int on_drop_ref{-1};
+    int on_step_ref{-1};
+    // Optional ticking (opt-in)
+    float tick_rate_hz{0.0f};
+    std::string tick_phase; // "before" or "after" (default after)
     int on_eject_ref{-1};
     int on_reload_start_ref{-1};
     int on_reload_finish_ref{-1};
@@ -136,9 +154,21 @@ class LuaManager {
     void call_projectile_on_hit_tile(int proj_type);
     void call_crate_on_open(int crate_type, State& state, struct Entity& player);
     void call_on_dash(State& state, struct Entity& player);
+    void call_on_step(State& state, struct Entity* player);
     void call_on_active_reload(State& state, struct Entity& player);
     void call_gun_on_active_reload(int gun_type, State& state, struct Entity& player);
     void call_item_on_active_reload(int item_type, State& state, struct Entity& player);
+    void call_on_failed_active_reload(State& state, struct Entity& player);
+    void call_gun_on_failed_active_reload(int gun_type, State& state, struct Entity& player);
+    void call_item_on_failed_active_reload(int item_type, State& state, struct Entity& player);
+    void call_on_tried_after_failed_ar(State& state, struct Entity& player);
+    void call_gun_on_tried_after_failed_ar(int gun_type, State& state, struct Entity& player);
+    void call_item_on_tried_after_failed_ar(int item_type, State& state, struct Entity& player);
+    void call_gun_on_step(int gun_type, State& state, struct Entity& player);
+    void call_gun_on_pickup(int gun_type, State& state, struct Entity& player);
+    void call_gun_on_drop(int gun_type, State& state, struct Entity& player);
+    void call_item_on_pickup(int item_type, State& state, struct Entity& player);
+    void call_item_on_drop(int item_type, State& state, struct Entity& player);
     void call_on_eject(State& state, struct Entity& player);
     void call_gun_on_eject(int gun_type, State& state, struct Entity& player);
     void call_item_on_eject(int item_type, State& state, struct Entity& player);
@@ -205,6 +235,9 @@ class LuaManager {
     DropTables drops_;
     int on_dash_ref{-1};
     int on_active_reload_ref{-1};
+    int on_failed_active_reload_ref{-1};
+    int on_tried_after_failed_ar_ref{-1};
+    int on_step_ref{-1};
     int on_eject_ref{-1};
     int on_reload_start_ref{-1};
     int on_reload_finish_ref{-1};

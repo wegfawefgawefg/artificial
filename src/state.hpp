@@ -86,6 +86,7 @@ struct State {
 
     // Dash state (shift)
     float dash_timer{0.0f};
+    glm::vec2 dash_dir{1.0f, 0.0f};
     // Rechargeable dash stocks
     int dash_max{1};
     int dash_stocks{1};
@@ -94,6 +95,7 @@ struct State {
     // UI FX: right-side gun panel shake (pixels)
     float gun_panel_shake{0.0f};
     float hp_bar_shake{0.0f};
+    float reload_bar_shake{0.0f};
 
     // Character panel (left) and gun panel (right)
     bool show_character_panel{false};
