@@ -1,58 +1,71 @@
 #pragma once
 
+#include "types.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include "types.hpp"
 
-template <typename T, std::size_t N>
-class Pool {
-public:
-  Pool() {
-    versions_.fill(1);
-  }
-
-  std::size_t capacity() const { return N; }
-
-  std::optional<VID> alloc() {
-    for (std::size_t i = 0; i < N; ++i) {
-      if (!items_[i].active) {
-        items_[i] = T{};
-        items_[i].active = true;
-        return VID{ i, versions_[i] };
-      }
+template <typename T, std::size_t N> class Pool {
+  public:
+    Pool() {
+        versions_.fill(1);
     }
-    return std::nullopt;
-  }
 
-  void free(VID v) {
-    if (v.id >= N) return;
-    if (versions_[v.id] != v.version) return;
-    items_[v.id].active = false;
-    versions_[v.id] += 1; // invalidate stale refs
-  }
+    std::size_t capacity() const {
+        return N;
+    }
 
-  T* get(VID v) {
-    if (v.id >= N) return nullptr;
-    if (versions_[v.id] != v.version) return nullptr;
-    if (!items_[v.id].active) return nullptr;
-    return &items_[v.id];
-  }
+    std::optional<VID> alloc() {
+        for (std::size_t i = 0; i < N; ++i) {
+            if (!items_[i].active) {
+                items_[i] = T{};
+                items_[i].active = true;
+                return VID{i, versions_[i]};
+            }
+        }
+        return std::nullopt;
+    }
 
-  const T* get(VID v) const {
-    if (v.id >= N) return nullptr;
-    if (versions_[v.id] != v.version) return nullptr;
-    if (!items_[v.id].active) return nullptr;
-    return &items_[v.id];
-  }
+    void free(VID v) {
+        if (v.id >= N)
+            return;
+        if (versions_[v.id] != v.version)
+            return;
+        items_[v.id].active = false;
+        versions_[v.id] += 1; // invalidate stale refs
+    }
 
-  // Raw access (useful for iteration/cleanup)
-  std::array<T, N>& data() { return items_; }
-  const std::array<T, N>& data() const { return items_; }
+    T* get(VID v) {
+        if (v.id >= N)
+            return nullptr;
+        if (versions_[v.id] != v.version)
+            return nullptr;
+        if (!items_[v.id].active)
+            return nullptr;
+        return &items_[v.id];
+    }
 
-private:
-  std::array<T, N> items_{};
-  std::array<std::uint32_t, N> versions_{};
+    const T* get(VID v) const {
+        if (v.id >= N)
+            return nullptr;
+        if (versions_[v.id] != v.version)
+            return nullptr;
+        if (!items_[v.id].active)
+            return nullptr;
+        return &items_[v.id];
+    }
+
+    // Raw access (useful for iteration/cleanup)
+    std::array<T, N>& data() {
+        return items_;
+    }
+    const std::array<T, N>& data() const {
+        return items_;
+    }
+
+  private:
+    std::array<T, N> items_{};
+    std::array<std::uint32_t, N> versions_{};
 };
-

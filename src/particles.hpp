@@ -1,4 +1,6 @@
 #pragma once
 
-struct Particles { void step() {} };
-
+struct Particles {
+    void step() {
+    }
+};

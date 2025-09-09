@@ -4,9 +4,16 @@
   "cmake.buildDirectory": "${workspaceFolder}/build",
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
-  "C_Cpp.errorSquiggles": "Enabled",
+  "C_Cpp.errorSquiggles": "enabled",
   "cmake.configureEnvironment": {},
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
+  "C_Cpp.clang_format_path": "/usr/bin/clang-format-14",
+  "C_Cpp.clang_format_fallbackStyle": "file",
+  "editor.formatOnSave": true,
   "files.associations": {
     "*.tpp": "cpp"
-  }
+  },
+  "C_Cpp.formatting": "clangFormat"
 }

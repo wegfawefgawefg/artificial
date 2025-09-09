@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 // Integer IDs instead of enums (moddable via data tables later)
 namespace ids {
@@ -17,9 +17,9 @@ inline constexpr int ET_NONE = 0;
 inline constexpr int ET_PLAYER = 1;
 inline constexpr int ET_NPC = 2;
 inline constexpr int ET_ITEM = 3;
-}
+} // namespace ids
 
 struct VID {
-  std::size_t id{0};
-  std::uint32_t version{0};
+    std::size_t id{0};
+    std::uint32_t version{0};
 };

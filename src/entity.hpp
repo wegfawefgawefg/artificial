@@ -1,63 +1,67 @@
 #pragma once
 
-#include <optional>
-#include <glm/glm.hpp>
-
 #include "types.hpp"
 
+#include <glm/glm.hpp>
+#include <optional>
+
 struct Entity {
-  bool active{false};
-  bool marked_for_destruction{false};
-  int type_{ids::ET_NONE};
-  VID vid{};
-  bool impassable{false};
+    bool active{false};
+    bool marked_for_destruction{false};
+    int type_{ids::ET_NONE};
+    VID vid{};
+    bool impassable{false};
 
-  glm::vec2 pos{0.0f, 0.0f};
-  glm::vec2 vel{0.0f, 0.0f};
-  glm::vec2 size{1.0f, 1.0f};
-  float rot{0.0f};
-  bool horizontal_flip{false};
+    glm::vec2 pos{0.0f, 0.0f};
+    glm::vec2 vel{0.0f, 0.0f};
+    glm::vec2 size{1.0f, 1.0f};
+    float rot{0.0f};
+    bool horizontal_flip{false};
 
-  std::uint32_t health{1};
-  std::uint32_t max_hp{1};
-  int physics_steps{1};
-  int sprite_id{-1};
+    std::uint32_t health{1};
+    std::uint32_t max_hp{1};
+    float shield{0.0f}; // current shield (optional)
+    float time_since_damage{0.0f};
+    int physics_steps{1};
+    int sprite_id{-1};
 
-  inline glm::vec2 half_size() const { return 0.5f * size; }
+    inline glm::vec2 half_size() const {
+        return 0.5f * size;
+    }
 
-  // Basic stat block (inspired by SYNTHETIK style). Units are engine-defined.
-  struct Stats {
-    // Survivability
-    float max_health{1000.0f};
-    float health_regen{0.0f};
-    float shield_max{700.0f};
-    float shield_regen{250.0f};
-    float armor{0.0f}; // percent reduction (0..75 caps benefits in original ref)
+    // Basic stat block (inspired by SYNTHETIK style). Units are engine-defined.
+    struct Stats {
+        // Survivability
+        float max_health{1000.0f};
+        float health_regen{0.0f};
+        float shield_max{700.0f};
+        float shield_regen{250.0f};
+        float armor{0.0f}; // percent reduction (0..75 caps benefits in original ref)
 
-    // Mobility
-    float move_speed{350.0f}; // units per second (reference scale)
-    float dodge{3.0f}; // percent chance
+        // Mobility
+        float move_speed{350.0f}; // units per second (reference scale)
+        float dodge{3.0f};        // percent chance
 
-    // Economy/modifiers
-    float scavenging{100.0f};
-    float currency{100.0f}; // 100 => 1x
-    float ammo_gain{100.0f}; // 100 => 1x
-    float luck{100.0f};
+        // Economy/modifiers
+        float scavenging{100.0f};
+        float currency{100.0f};  // 100 => 1x
+        float ammo_gain{100.0f}; // 100 => 1x
+        float luck{100.0f};
 
-    // Combat
-    float crit_chance{3.0f}; // percent
-    float crit_damage{200.0f}; // 200 => 2x
-    float headshot_damage{200.0f};
-    float damage_absorb{100.0f}; // 100 => 1/1
-    float damage_output{100.0f}; // 100 => 1x
-    float healing{100.0f}; // 100 => 1x
-    float accuracy{100.0f}; // divider basis
-    float terror_level{100.0f};
+        // Combat
+        float crit_chance{3.0f};   // percent
+        float crit_damage{200.0f}; // 200 => 2x
+        float headshot_damage{200.0f};
+        float damage_absorb{100.0f}; // 100 => 1/1
+        float damage_output{100.0f}; // 100 => 1x
+        float healing{100.0f};       // 100 => 1x
+        float accuracy{100.0f};      // divider basis
+        float terror_level{100.0f};
 
-    // Armor plates: each consumes one hit before applying damage
-    int plates{0};
-  } stats{};
+        // Armor plates: each consumes one hit before applying damage
+        int plates{0};
+    } stats{};
 
-  // Equipment
-  std::optional<VID> equipped_gun_vid{};
+    // Equipment
+    std::optional<VID> equipped_gun_vid{};
 };
