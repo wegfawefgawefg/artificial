@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <optional>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -100,4 +101,72 @@ struct State {
     // Character panel (left) and gun panel (right)
     bool show_character_panel{false};
     float character_panel_slide{0.0f}; // 0..1
+
+    // Metrics (per-stage). Designed for multi-player: per-player metrics keyed by entity slots.
+    struct PlayerMetrics {
+        bool active{false};
+        std::uint32_t version{0}; // to validate VID
+        // Combat/accuracy
+        std::uint32_t shots_fired{0};
+        std::uint32_t shots_hit{0};
+        // Reloads
+        std::uint32_t reloads{0};
+        std::uint32_t active_reload_success{0};
+        std::uint32_t active_reload_fail{0};
+        // Jams
+        std::uint32_t jams{0};
+        std::uint32_t unjam_mashes{0};
+        // Mobility
+        std::uint32_t dashes_used{0};
+        float dash_distance{0.0f};
+        // Loot
+        std::uint32_t powerups_picked{0};
+        std::uint32_t items_picked{0};
+        std::uint32_t guns_picked{0};
+        std::uint32_t items_dropped{0};
+        std::uint32_t guns_dropped{0};
+    };
+
+    struct StageMetrics {
+        // Global
+        float time_in_stage{0.0f};
+        std::uint32_t enemies_slain{0};
+        std::unordered_map<int, std::uint32_t> enemies_slain_by_type;
+        std::uint32_t crates_opened{0};
+        // Totals for missed calculations (optional to fill at generation time)
+        std::uint32_t crates_spawned{0};
+        std::uint32_t powerups_spawned{0};
+        std::uint32_t items_spawned{0};
+        std::uint32_t guns_spawned{0};
+        // Per-player array sized to Entities::MAX; index by VID.id, validate version
+        std::vector<PlayerMetrics> per_player;
+
+        void reset(std::size_t max_players) {
+            time_in_stage = 0.0f;
+            enemies_slain = 0;
+            enemies_slain_by_type.clear();
+            crates_opened = 0;
+            crates_spawned = 0;
+            powerups_spawned = 0;
+            items_spawned = 0;
+            guns_spawned = 0;
+            per_player.clear();
+            per_player.resize(max_players);
+        }
+    } metrics{};
+
+    // Helpers to fetch per-player metrics by VID
+    PlayerMetrics* metrics_for(VID v) {
+        if (metrics.per_player.empty())
+            metrics.per_player.resize(Entities::MAX);
+        if (v.id >= metrics.per_player.size())
+            metrics.per_player.resize(v.id + 1);
+        auto& m = metrics.per_player[v.id];
+        if (!m.active || m.version != v.version) {
+            m = PlayerMetrics{};
+            m.active = true;
+            m.version = v.version;
+        }
+        return &m;
+    }
 };

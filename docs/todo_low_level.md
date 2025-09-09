@@ -36,3 +36,12 @@ Ticking
 
 HUD details
 - Dash slivers left-aligned; allow tuning `slw`/`sgap` in settings for iteration.
+
+Pages/Rooms (new)
+- Reduce `EXIT_COUNTDOWN_SECONDS` to 5s; `SCORE_REVIEW_INPUT_DELAY` ≈0.8s.
+- Gate HUD/world renders to `MODE_PLAYING` only.
+- Stage Review page: heading + metrics; prompt bottom center.
+- Next Area page: heading + next-room info (name/type/difficulty%); prompt bottom center.
+- Proceed conditions: SPACE or left click after delay.
+- Add State metrics counters: damage_dealt, shots_fired/hit, dashes_used, dmg_taken, dmg_shields, plates_gained/lost, time_in_stage, crates_opened, pickups.
+- Add Decoration data and renderer pass; y-sort with entities; texture lookup via sprite key.

@@ -15,5 +15,5 @@ inline constexpr float DASH_COOLDOWN_SECONDS = 0.8f;
 // Gun rendering / muzzle offset (world units from player center)
 inline constexpr float GUN_HOLD_OFFSET_UNITS = 0.30f;
 inline constexpr float GUN_MUZZLE_OFFSET_UNITS = 0.40f; // where bullets spawn (reduced)
-inline constexpr float EXIT_COUNTDOWN_SECONDS = 10.0f;
-inline constexpr float SCORE_REVIEW_INPUT_DELAY = 3.0f;
+inline constexpr float EXIT_COUNTDOWN_SECONDS = 5.0f;
+inline constexpr float SCORE_REVIEW_INPUT_DELAY = 0.8f;

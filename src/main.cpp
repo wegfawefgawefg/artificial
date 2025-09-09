@@ -409,6 +409,13 @@ init_ok:
                             state.dash_dir = dir; // already normalized
                             state.dash_timer = DASH_TIME_SECONDS;
                             state.dash_stocks -= 1;
+                            // Metrics: dashes used and distance (approximate)
+                            if (state.player_vid) {
+                                if (auto* pm = state.metrics_for(*state.player_vid)) {
+                                    pm->dashes_used += 1;
+                                    pm->dash_distance += DASH_SPEED_UNITS_PER_SEC * DASH_TIME_SECONDS;
+                                }
+                            }
                             state.reticle_shake =
                                 std::max(state.reticle_shake, 8.0f); // kick the reticle
                             if (g_lua_mgr && state.player_vid) {
@@ -541,8 +548,8 @@ init_ok:
                 }
             }
 
-            // Auto-pickup powerups on overlap
-            if (state.player_vid) {
+                    // Auto-pickup powerups on overlap
+                    if (state.mode == ids::MODE_PLAYING && state.player_vid) {
                 const Entity* p = state.entities.get(*state.player_vid);
                 if (p) {
                     glm::vec2 ph = p->half_size();
@@ -557,6 +564,11 @@ init_ok:
                                 state.alerts.push_back(
                                     {std::string("Picked up ") + pu.name, 0.0f, 2.0f, false});
                                 pu.active = false;
+                                // Metrics: count powerups picked by player
+                                if (state.player_vid) {
+                                    if (auto* pm = state.metrics_for(*state.player_vid))
+                                        pm->powerups_picked += 1;
+                                }
                             }
                         }
                 }
@@ -1011,6 +1023,11 @@ init_ok:
                 }
             }
 
+            // Accumulate time-in-stage metrics
+            if (state.mode == ids::MODE_PLAYING) {
+                state.metrics.time_in_stage += TIMESTEP;
+            }
+
             // Exit countdown and mode transitions
             if (state.mode == ids::MODE_PLAYING) {
                 const Entity* p =
@@ -1055,7 +1072,7 @@ init_ok:
                         std::printf("[room] Countdown complete. Entering score review.\n");
                     }
                 }
-            } else if (state.mode == ids::MODE_SCORE_REVIEW) {
+            } else if (state.mode == ids::MODE_SCORE_REVIEW || state.mode == ids::MODE_NEXT_STAGE) {
                 if (state.score_ready_timer > 0.0f)
                     state.score_ready_timer -= TIMESTEP;
             }
@@ -1128,6 +1145,11 @@ init_ok:
                                             {"Active Reload!", 0.0f, 1.2f, false});
                                         state.reticle_shake = std::max(state.reticle_shake, 6.0f);
                                         sounds.play("base:ui_super_confirm");
+                                        // Metrics
+                                        if (state.player_vid) {
+                                            if (auto* pm = state.metrics_for(*state.player_vid))
+                                                pm->active_reload_success += 1;
+                                        }
                                         // Hooks: global, gun, items
                                         if (g_lua_mgr) {
                                             g_lua_mgr->call_on_active_reload(state, *plm);
@@ -1151,6 +1173,11 @@ init_ok:
                                             std::max(state.reload_bar_shake, 6.0f);
                                         state.alerts.push_back(
                                             {"Active Reload Failed", 0.0f, 0.7f, false});
+                                        // Metrics
+                                        if (state.player_vid) {
+                                            if (auto* pm = state.metrics_for(*state.player_vid))
+                                                pm->active_reload_fail += 1;
+                                        }
                                         if (g_lua_mgr) {
                                             g_lua_mgr->call_on_failed_active_reload(state, *plm);
                                             g_lua_mgr->call_gun_on_failed_active_reload(
@@ -1192,6 +1219,11 @@ init_ok:
                                     gim->current_mag = 0;
                                     // Start active reload sequence
                                     gim->reloading = true;
+                                    // Metrics: reloads
+                                    if (state.player_vid) {
+                                        if (auto* pm = state.metrics_for(*state.player_vid))
+                                            pm->reloads += 1;
+                                    }
                                     gim->reload_progress = 0.0f;
                                     gim->reload_eject_remaining = std::max(0.0f, gd->eject_time);
                                     gim->reload_total_time = std::max(0.1f, gd->reload_time);
@@ -1356,13 +1388,23 @@ init_ok:
                                     gim->jammed = true;
                                     gim->unjam_progress = 0.0f;
                                     fired = false;
-                                    if (g_lua_mgr)
-                                        g_lua_mgr->call_gun_on_jam(gim->def_type, state, *plm);
-                                    sounds.play(gd->sound_jam.empty() ? "base:ui_cant"
+                            if (g_lua_mgr)
+                                g_lua_mgr->call_gun_on_jam(gim->def_type, state, *plm);
+                            sounds.play(gd->sound_jam.empty() ? "base:ui_cant"
                                                                       : gd->sound_jam);
-                                    state.alerts.push_back(
-                                        {"Gun jammed! Mash SPACE", 0.0f, 2.0f, false});
+                            state.alerts.push_back(
+                                {"Gun jammed! Mash SPACE", 0.0f, 2.0f, false});
+                            // Metrics
+                            if (state.player_vid) {
+                                if (auto* pm = state.metrics_for(*state.player_vid))
+                                    pm->jams += 1;
+                            }
                                 }
+                            }
+                            // Metrics: shots fired (only if we attempted and had ammo / not blocked)
+                            if (fired && state.player_vid) {
+                                if (auto* pm = state.metrics_for(*state.player_vid))
+                                    pm->shots_fired += 1;
                             }
                         }
                     }
@@ -1449,6 +1491,11 @@ init_ok:
                         if (now_space && !prev_space) {
                             state.reticle_shake = std::max(state.reticle_shake, 20.0f);
                             gim->unjam_progress = std::min(1.0f, gim->unjam_progress + 0.2f);
+                            // Metrics: count unjam mashes
+                            if (state.player_vid) {
+                                if (auto* pm = state.metrics_for(*state.player_vid))
+                                    pm->unjam_mashes += 1;
+                            }
                         }
                         prev_space = now_space;
                         if (gim->unjam_progress >= 1.0f) {
@@ -1515,6 +1562,11 @@ init_ok:
                 [&](Projectile& pr, const Entity& hit) {
                     if (g_lua_mgr && pr.def_type)
                         g_lua_mgr->call_projectile_on_hit_entity(pr.def_type);
+                    // Attribute hit to owner for accuracy metrics
+                    if (pr.owner) {
+                        if (auto* pm = state.metrics_for(*pr.owner))
+                            pm->shots_hit += 1;
+                    }
                     hits.push_back(hit.vid.id);
                 },
                 [&](Projectile& pr) {
@@ -1735,7 +1787,7 @@ init_ok:
 
         // Allow proceeding from score review after delay
         if (state.mode == ids::MODE_SCORE_REVIEW && state.score_ready_timer <= 0.0f) {
-            if (state.menu_inputs.confirm || state.playing_inputs.use_center) {
+            if (state.menu_inputs.confirm || state.playing_inputs.use_center || state.mouse_inputs.left) {
                 // Cleanup ground instances (free orphans)
                 for (auto& gi : state.ground_items.data())
                     if (gi.active) {
@@ -1747,7 +1799,15 @@ init_ok:
                         state.guns.free(gg.gun_vid);
                         gg.active = false;
                     }
-                std::printf("[room] Proceeding to next area.\n");
+                std::printf("[room] Proceeding to next area info screen.\n");
+                state.mode = ids::MODE_NEXT_STAGE;
+                state.score_ready_timer = 0.5f; // brief delay before allowing confirm
+            }
+        }
+        // Proceed from next-stage info to actual next area
+        if (state.mode == ids::MODE_NEXT_STAGE && state.score_ready_timer <= 0.0f) {
+            if (state.menu_inputs.confirm || state.playing_inputs.use_center || state.mouse_inputs.left) {
+                std::printf("[room] Entering next area.\n");
                 state.alerts.push_back({"Entering next area", 0.0f, 2.0f, false});
                 state.mode = ids::MODE_PLAYING;
                 generate_room(state, projectiles, renderer, gfx);
@@ -1774,8 +1834,9 @@ init_ok:
                 return SDL_FPoint{sx, sy};
             };
 
-            // draw tiles
-            for (int y = 0; y < (int)state.stage.get_height(); ++y) {
+            if (state.mode == ids::MODE_PLAYING) {
+                // draw tiles
+                for (int y = 0; y < (int)state.stage.get_height(); ++y) {
                 for (int x = 0; x < (int)state.stage.get_width(); ++x) {
                     const auto& t = state.stage.at(x, y);
                     bool is_start = (x == state.start_tile.x && y == state.start_tile.y);
@@ -1799,10 +1860,10 @@ init_ok:
                         SDL_RenderFillRect(renderer, &tr);
                     }
                 }
+                }
             }
-            // Crate interaction: progress when overlapping player; draw with progress bar and
-            // label; open and drop loot after crate-defined time
-            if (state.player_vid) {
+            // Crate interaction: only in gameplay
+            if (state.mode == ids::MODE_PLAYING && state.player_vid) {
                 const Entity* p = state.entities.get(*state.player_vid);
                 if (p) {
                     glm::vec2 ph = p->half_size();
@@ -1870,6 +1931,8 @@ init_ok:
                             if (c.open_progress >= open_time) {
                                 c.opened = true;
                                 c.active = false;
+                                // Metrics: crate opened
+                                state.metrics.crates_opened += 1;
                                 // drop some loot
                                 glm::vec2 pos = c.pos;
                                 if (g_lua_mgr) {
@@ -1949,7 +2012,8 @@ init_ok:
                         }
                 }
             }
-            // draw entities
+            // draw entities (only during gameplay)
+            if (state.mode == ids::MODE_PLAYING)
             for (auto const& e : state.entities.data()) {
                 if (!e.active)
                     continue;
@@ -2051,6 +2115,7 @@ init_ok:
             }
 
             // Enemy health bars above heads (for damaged NPCs)
+            if (state.mode == ids::MODE_PLAYING)
             for (auto const& e : state.entities.data()) {
                 if (!e.active || e.type_ != ids::ET_NPC)
                     continue;
@@ -2108,6 +2173,7 @@ init_ok:
                 pt = pdraw->pos.y - ph.y;
                 pb = pdraw->pos.y + ph.y;
             }
+            if (state.mode == ids::MODE_PLAYING)
             for (auto const& pu : state.pickups.data())
                 if (pu.active) {
                     SDL_FPoint c = world_to_screen(pu.pos.x - 0.125f, pu.pos.y - 0.125f);
@@ -2145,6 +2211,7 @@ init_ok:
                         }
                     }
                 }
+            if (state.mode == ids::MODE_PLAYING)
             for (auto const& gi : state.ground_items.data())
                 if (gi.active) {
                     SDL_FPoint c =
@@ -2181,6 +2248,7 @@ init_ok:
                     // outline handled in consolidated best-overlap block
                 }
             // draw ground guns (magenta if no sprite)
+            if (state.mode == ids::MODE_PLAYING)
             for (auto const& gg : state.ground_guns.data())
                 if (gg.active) {
                     SDL_FPoint c =
@@ -2214,7 +2282,7 @@ init_ok:
                     }
                 }
             // Consolidated pickup prompt: show only for the most-overlapped target
-            if (pdraw && ui_font) {
+            if (pdraw && ui_font && state.mode == ids::MODE_PLAYING) {
                 enum class PK { None, Gun, Item };
                 PK best_kind = PK::None;
                 std::size_t best_idx = (std::size_t)-1;
@@ -2349,7 +2417,7 @@ init_ok:
             // (alerts are rendered at the very end for top-layer visibility)
 
             // draw cursor crosshair + circle (in screen-space at actual mouse position)
-            {
+            if (state.mode == ids::MODE_PLAYING) {
                 int mx = state.mouse_inputs.pos.x;
                 int my = state.mouse_inputs.pos.y;
                 if (state.reticle_shake > 0.01f) {
@@ -2481,19 +2549,28 @@ init_ok:
                                     SDL_SetRenderDrawColor(renderer, 180, 200, 200, 220);
                                     SDL_RenderFillRect(renderer, &rf);
                                 }
-                                // text: RELOAD / NO AMMO when mag==0
-                                if (ui_font && gi->current_mag == 0) {
-                                    const char* txt = (gi->ammo_reserve > 0) ? "RELOAD" : "NO AMMO";
+                                // Text label priority: JAMMED! > RELOAD/NO AMMO
+                                if (ui_font) {
+                                    const char* txt = nullptr;
                                     SDL_Color col{250, 220, 80, 255};
-                                    SDL_Surface* s = TTF_RenderUTF8_Blended(ui_font, txt, col);
-                                    if (s) {
-                                        SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s);
-                                        int tw = 0, th = 0;
-                                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                                        SDL_Rect d{rx - 4, ry - th - 4, tw, th};
-                                        SDL_RenderCopy(renderer, t, nullptr, &d);
-                                        SDL_DestroyTexture(t);
-                                        SDL_FreeSurface(s);
+                                    if (gi->jammed) {
+                                        txt = "JAMMED!";
+                                        col = SDL_Color{240, 80, 80, 255};
+                                    } else if (gi->current_mag == 0) {
+                                        txt = (gi->ammo_reserve > 0) ? "RELOAD" : "NO AMMO";
+                                        col = SDL_Color{250, 220, 80, 255};
+                                    }
+                                    if (txt) {
+                                        SDL_Surface* s = TTF_RenderUTF8_Blended(ui_font, txt, col);
+                                        if (s) {
+                                            SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s);
+                                            int tw = 0, th = 0;
+                                            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                                            SDL_Rect d{rx - 4, ry - th - 4, tw, th};
+                                            SDL_RenderCopy(renderer, t, nullptr, &d);
+                                            SDL_DestroyTexture(t);
+                                            SDL_FreeSurface(s);
+                                        }
                                     }
                                 }
                                 // jam UI: draw unjam progress when jammed
@@ -2568,8 +2645,12 @@ init_ok:
                 }
             }
 
-            // Score review overlay
+            // Score review page (full-screen overlay)
             if (state.mode == ids::MODE_SCORE_REVIEW) {
+                // Full-screen backdrop
+                SDL_Rect full{0, 0, width, height};
+                SDL_SetRenderDrawColor(renderer, 18, 18, 22, 255);
+                SDL_RenderFillRect(renderer, &full);
                 int box_w = width - 200;
                 int box_h = 100;
                 int box_x = (width - box_w) / 2;
@@ -2579,6 +2660,74 @@ init_ok:
                 SDL_RenderFillRect(renderer, &box);
                 SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255);
                 SDL_RenderDrawRect(renderer, &box);
+                // Heading and prompt
+                if (ui_font) {
+                    SDL_Color titlec{240, 220, 80, 255};
+                    SDL_Surface* ts = TTF_RenderUTF8_Blended(ui_font, "Stage Clear", titlec);
+                    if (ts) {
+                        SDL_Texture* tt = SDL_CreateTextureFromSurface(renderer, ts);
+                        int tw=0, th=0; SDL_QueryTexture(tt, nullptr, nullptr, &tw, &th);
+                        SDL_Rect td{box_x + 24, box_y + 16, tw, th};
+                        SDL_RenderCopy(renderer, tt, nullptr, &td);
+                        SDL_DestroyTexture(tt);
+                        SDL_FreeSurface(ts);
+                    }
+                    if (state.score_ready_timer <= 0.0f) {
+                        SDL_Color pc{200, 200, 210, 255};
+                        SDL_Surface* ps = TTF_RenderUTF8_Blended(ui_font,
+                            "Press SPACE or CLICK to continue", pc);
+                        if (ps) {
+                            SDL_Texture* ptex = SDL_CreateTextureFromSurface(renderer, ps);
+                            int prompt_w=0, prompt_h=0; SDL_QueryTexture(ptex, nullptr, nullptr, &prompt_w, &prompt_h);
+                            SDL_Rect pd{width/2 - prompt_w/2, height - prompt_h - 20, prompt_w, prompt_h};
+                            SDL_RenderCopy(renderer, ptex, nullptr, &pd);
+                            SDL_DestroyTexture(ptex);
+                            SDL_FreeSurface(ps);
+                        }
+                    }
+                }
+                // Text metrics (basic)
+                if (ui_font) {
+                    int tx = box_x + 24;
+                    int ty = box_y + 48;
+                    auto draw_line = [&](const std::string& s, SDL_Color col) {
+                        SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, s.c_str(), col);
+                        if (!srf)
+                            return;
+                        SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, srf);
+                        int tw=0, th=0; SDL_QueryTexture(tex, nullptr, nullptr, &tw, &th);
+                        SDL_Rect d{tx, ty, tw, th};
+                        SDL_RenderCopy(renderer, tex, nullptr, &d);
+                        SDL_DestroyTexture(tex);
+                        SDL_FreeSurface(srf);
+                        ty += 18;
+                    };
+                    SDL_Color mc{210, 210, 220, 255};
+                    char buf[128];
+                    std::snprintf(buf, sizeof(buf), "Time: %.1fs", (double)state.metrics.time_in_stage);
+                    draw_line(buf, mc);
+                    // Per-player lines
+                    int idx = 1;
+                    for (auto const& e : state.entities.data()) {
+                        if (!e.active || e.type_ != ids::ET_PLAYER)
+                            continue;
+                        const auto* pm = state.metrics_for(e.vid);
+                        if (!pm)
+                            continue;
+                        std::snprintf(buf, sizeof(buf), "Player %d:", idx++);
+                        draw_line(buf, SDL_Color{240, 220, 80, 255});
+                        std::snprintf(buf, sizeof(buf), "  Shots: %u hit / %u fired (%.0f%%)",
+                                      pm->shots_hit, pm->shots_fired,
+                                      (pm->shots_fired ? (100.0 * (double)pm->shots_hit / (double)pm->shots_fired) : 0.0));
+                        draw_line(buf, mc);
+                        std::snprintf(buf, sizeof(buf), "  Dashes: %u  Powerups: %u  Reloads: %u  AR: %u/%u",
+                                      pm->dashes_used, pm->powerups_picked, pm->reloads,
+                                      pm->active_reload_success, pm->active_reload_fail);
+                        draw_line(buf, mc);
+                    }
+                    std::snprintf(buf, sizeof(buf), "Crates opened: %u", state.metrics.crates_opened);
+                    draw_line(buf, mc);
+                }
                 // Ready indicator bar if waiting
                 if (state.score_ready_timer > 0.0f) {
                     float ratio = state.score_ready_timer / SCORE_REVIEW_INPUT_DELAY;
@@ -2595,8 +2744,54 @@ init_ok:
                                    box_y + 20);
             }
 
+            // Next stage details page (full-screen overlay)
+            if (state.mode == ids::MODE_NEXT_STAGE) {
+                SDL_Rect full{0, 0, width, height};
+                SDL_SetRenderDrawColor(renderer, 18, 18, 22, 255);
+                SDL_RenderFillRect(renderer, &full);
+                int box_w = width - 200;
+                int box_h = 140;
+                int box_x = (width - box_w) / 2;
+                int box_y = 40;
+                SDL_Rect box{box_x, box_y, box_w, box_h};
+                SDL_SetRenderDrawColor(renderer, 30, 30, 40, 220);
+                SDL_RenderFillRect(renderer, &box);
+                SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255);
+                SDL_RenderDrawRect(renderer, &box);
+                // Simple decorative line as header separator
+                SDL_SetRenderDrawColor(renderer, 240, 220, 80, 255);
+                SDL_RenderDrawLine(renderer, box_x + 20, box_y + 20, box_x + box_w - 20,
+                                   box_y + 20);
+                // Heading and prompt
+                if (ui_font) {
+                    SDL_Color titlec{240, 220, 80, 255};
+                    SDL_Surface* ts = TTF_RenderUTF8_Blended(ui_font, "Next Area", titlec);
+                    if (ts) {
+                        SDL_Texture* tt = SDL_CreateTextureFromSurface(renderer, ts);
+                        int tw=0, th=0; SDL_QueryTexture(tt, nullptr, nullptr, &tw, &th);
+                        SDL_Rect td{box_x + 24, box_y + 16, tw, th};
+                        SDL_RenderCopy(renderer, tt, nullptr, &td);
+                        SDL_DestroyTexture(tt);
+                        SDL_FreeSurface(ts);
+                    }
+                    if (state.score_ready_timer <= 0.0f) {
+                        SDL_Color pc{200, 200, 210, 255};
+                        SDL_Surface* ps = TTF_RenderUTF8_Blended(ui_font,
+                            "Press SPACE or CLICK to continue", pc);
+                        if (ps) {
+                            SDL_Texture* ptex = SDL_CreateTextureFromSurface(renderer, ps);
+                            int prompt_w=0, prompt_h=0; SDL_QueryTexture(ptex, nullptr, nullptr, &prompt_w, &prompt_h);
+                            SDL_Rect pd{width/2 - prompt_w/2, height - prompt_h - 20, prompt_w, prompt_h};
+                            SDL_RenderCopy(renderer, ptex, nullptr, &pd);
+                            SDL_DestroyTexture(ptex);
+                            SDL_FreeSurface(ps);
+                        }
+                    }
+                }
+            }
+
             // Character stats panel (left 30%, sliding)
-            if (ui_font) {
+            if (ui_font && state.mode == ids::MODE_PLAYING) {
                 float target = state.show_character_panel ? 1.0f : 0.0f;
                 // animate
                 state.character_panel_slide = state.character_panel_slide +
@@ -2977,7 +3172,7 @@ init_ok:
             }
 
             // Bottom player condition bars (shield, plates, health) with numbers and fixed width
-            if (ui_font && state.player_vid) {
+            if (ui_font && state.mode == ids::MODE_PLAYING && state.player_vid) {
                 const Entity* p = state.entities.get(*state.player_vid);
                 if (p) {
                     int group_w = std::max(200, (int)std::lround(width * 0.25));
@@ -3044,8 +3239,8 @@ init_ok:
                         int to_show = std::min(20, p->stats.plates);
                         int slw = 6;
                         int gap = 2;
-                        int all_w = to_show > 0 ? to_show * slw + (to_show - 1) * gap : 0;
-                        int start_x = gx + (group_w - all_w) / 2;
+                        // Left-align plate slivers (match dash behavior)
+                        int start_x = gx;
                         for (int i = 0; i < to_show; ++i) {
                             SDL_Rect prr{start_x + i * (slw + gap), gy2 + 2, slw, bar_h - 4};
                             SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
@@ -3071,7 +3266,7 @@ init_ok:
                     draw_bar(gx, gy4, group_w, bar_h, 0.0f, SDL_Color{0, 0, 0, 0});
                     if (state.dash_max > 0) {
                         int segs = state.dash_max;
-                        int slw = 6;
+                        int slw = 12; // wider dash slivers
                         int sgap = 2;
                         int start_x = gx; // left-aligned slivers
                         for (int i = 0; i < segs; ++i) {
@@ -3090,7 +3285,8 @@ init_ok:
                             double pratio = std::clamp((double)(state.dash_refill_timer / DASH_COOLDOWN_SECONDS), 0.0, 1.0);
                             int pw = (int)std::lround((double)group_w * pratio);
                             int psl = std::max(2, bar_h / 4);
-                            SDL_Rect pbar{gx, gy4 - (psl + 2), pw, psl};
+                            // Place the refill bar immediately above the dash bar (flush against it)
+                            SDL_Rect pbar{gx, gy4 - psl, pw, psl};
                             SDL_SetRenderDrawColor(renderer, 90, 200, 160, 200);
                             SDL_RenderFillRect(renderer, &pbar);
                         }
@@ -3194,6 +3390,8 @@ static void generate_room(State& state, Projectiles& projectiles, SDL_Renderer* 
     std::uint32_t W = static_cast<std::uint32_t>(dwh(rng));
     std::uint32_t H = static_cast<std::uint32_t>(dwh(rng));
     state.stage = Stage(W, H);
+    // Reset per-stage metrics for a fresh room
+    state.metrics.reset(Entities::MAX);
     state.stage.fill_border(TileProps::Make(true, true));
     // sprinkle obstacles (walls and voids)
     int tiles = static_cast<int>(W * H);

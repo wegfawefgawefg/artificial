@@ -115,6 +115,7 @@ Open Work
 - Settings persistence: write .ini changes from in‑game menu.
 - Clean up legacy C API path once sol2 is standard.
 - See docs/todo_high_level.md and docs/todo_low_level.md for details.
+ - Pages/Rooms: Stage Review and Next Area pages (no HUD/world in background), metrics display, next-room details; 3-room loop and decorations (see stages_and_decorations.md).
 
 Local Run Book (quick)
 ----------------------

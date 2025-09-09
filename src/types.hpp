@@ -12,6 +12,7 @@ inline constexpr int MODE_PLAYING = 3;
 inline constexpr int MODE_GAME_OVER = 4;
 inline constexpr int MODE_WIN = 5;
 inline constexpr int MODE_SCORE_REVIEW = 6;
+inline constexpr int MODE_NEXT_STAGE = 7;
 
 inline constexpr int ET_NONE = 0;
 inline constexpr int ET_PLAYER = 1;

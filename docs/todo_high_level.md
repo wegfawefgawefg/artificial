@@ -10,6 +10,9 @@ High-Level TODO
 - Modifiers (design ready): Implement registry + attached modifiers with stats pipeline and hooks (defer until after core polish).
 - Rendering: Animated sprite playback and projectile sprites using SpriteStore frame data.
 - UX & Persistence: Gun detail panel polish; save input settings back to .ini; optional audio settings.
+- Rooms/Pages: Split world render from pages; add Stage Review and Next Area pages with metrics and next-room details; click/space to continue.
+- Rooms/Rotation: Add 3-room loop (Prep → Arena → Gauntlet) with simple generators.
+- Decor: Add non-interactable decorations (z-sorted by Y); Lua placement API.
 - Cleanup & Tooling: Trim legacy paths; ASan/UBSan preset; small logging helper.
 
 Ticking (Opt-in) Roadmap
