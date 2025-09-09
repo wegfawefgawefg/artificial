@@ -31,3 +31,17 @@ Safety/Polish
 Scaffolding
 - Mods scaffold: mods/base/ with info.toml and folders (graphics, sounds, music, scripts). Base content in scripts/content.lua.
 - Hot reload: ModsManager scans and rebuilds sprite registry/store on asset changes; script changes detected.
+
+Session: Sprites, Reload, Dash, UX/FX
+- Projectiles: Added `sprite` field to Lua `register_projectile{}`; engine resolves to `sprite_id` and renders projectile textures (fallback to red rect).
+- Sprites: Enforced namespaced-only lookups across powerups/items/guns/entities; removed implicit non-namespaced fallbacks. Added one-frame red warnings when attempting to draw missing sprites/textures.
+- Held gun: Rendered around player, rotated toward cursor. Tunable offsets for hold and muzzle (`GUN_HOLD_OFFSET_UNITS`, `GUN_MUZZLE_OFFSET_UNITS`).
+- Firing bug: Fixed firing after dropping equipped gun (unequip on drop and disallow firing without equipped gun).
+- Movement: Slowed base speed; added Shift dash. Dash stocks with timed refill. Lua APIs: `api.set_dash_max`, `api.set_dash_stocks`, `api.add_dash_stocks`. Global `on_dash()` hook and `register_on_dash(fn)`.
+- Shield regen: Regenerates only after 3s without taking damage; tracked per-entity via `time_since_damage`.
+- UI/FX: Reticle shake on unjam mash and success; gun panel shake on equip; bottom player condition bar (health red, plates grey slivers, shield cyan) plus dash stock indicators; enemy health bars above damaged NPCs.
+- Active reload system: Eject phase then fill; active window for instant reload.
+  - GunDef fields: `reload_time`, `eject_time`, `ar_pos`, `ar_pos_variance`, `ar_size`, `ar_size_variance` (legacy `active_reload_window` maps to `ar_size`).
+  - Hooks: Global `on_active_reload`, `on_eject`, `on_reload_start`, `on_reload_finish`; per-gun `on_active_reload` and per-item `on_active_reload`; also per-gun/item eject/start/finish variants.
+  - UI: Active window is translucent band; progress rectangle grows from bottom of bar; successful active reload plays `base:ui_super_confirm` and alerts.
+- Formatting: Wired VS Code to use clang-format-14; repo formatted to 4-space indents; fixed invalid settings JSON.

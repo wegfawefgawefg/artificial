@@ -16,8 +16,15 @@ struct GunInstance {
     bool jammed{false};
     float unjam_progress{0.0f}; // 0..1 when mashing space
     int burst_remaining{0};
-    float burst_timer{0.0f};
-    float reload_timer{0.0f};
+  float burst_timer{0.0f};
+  // Active reload state
+  bool reloading{false};
+  float reload_progress{0.0f}; // 0..1 after eject
+  float reload_eject_remaining{0.0f};
+  float reload_total_time{0.0f};
+  float ar_window_start{0.0f}; // fraction 0..1
+  float ar_window_end{0.0f};   // fraction 0..1
+  bool ar_consumed{false};
 };
 
 class GunsPool : public Pool<GunInstance, 1024> {

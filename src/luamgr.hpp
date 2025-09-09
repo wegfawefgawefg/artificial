@@ -30,6 +30,10 @@ struct ItemDef {
     int on_tick_ref{-1};
     int on_shoot_ref{-1};
     int on_damage_ref{-1};
+    int on_active_reload_ref{-1};
+    int on_eject_ref{-1};
+    int on_reload_start_ref{-1};
+    int on_reload_finish_ref{-1};
 };
 struct GunDef {
     std::string name;
@@ -52,6 +56,17 @@ struct GunDef {
     int burst_count{0};
     float burst_rpm{0.0f};
     float reload_time{1.0f};
+    float eject_time{0.2f};
+    // Active reload window definition
+    float ar_pos{0.5f};               // center position 0..1
+    float ar_pos_variance{0.0f};      // +/- variance applied to center
+    float ar_size{0.15f};             // size 0..1
+    float ar_size_variance{0.0f};     // +/- variance applied to size
+    float active_reload_window{0.0f}; // legacy fallback for ar_size when >0
+    int on_active_reload_ref{-1};
+    int on_eject_ref{-1};
+    int on_reload_start_ref{-1};
+    int on_reload_finish_ref{-1};
 };
 
 struct ProjectileDef {
@@ -121,6 +136,18 @@ class LuaManager {
     void call_projectile_on_hit_tile(int proj_type);
     void call_crate_on_open(int crate_type, State& state, struct Entity& player);
     void call_on_dash(State& state, struct Entity& player);
+    void call_on_active_reload(State& state, struct Entity& player);
+    void call_gun_on_active_reload(int gun_type, State& state, struct Entity& player);
+    void call_item_on_active_reload(int item_type, State& state, struct Entity& player);
+    void call_on_eject(State& state, struct Entity& player);
+    void call_gun_on_eject(int gun_type, State& state, struct Entity& player);
+    void call_item_on_eject(int item_type, State& state, struct Entity& player);
+    void call_on_reload_start(State& state, struct Entity& player);
+    void call_gun_on_reload_start(int gun_type, State& state, struct Entity& player);
+    void call_item_on_reload_start(int item_type, State& state, struct Entity& player);
+    void call_on_reload_finish(State& state, struct Entity& player);
+    void call_gun_on_reload_finish(int gun_type, State& state, struct Entity& player);
+    void call_item_on_reload_finish(int item_type, State& state, struct Entity& player);
     const CrateDef* find_crate(int type) const {
         for (auto const& c : crates_)
             if (c.type == type)
@@ -177,6 +204,10 @@ class LuaManager {
     std::vector<CrateDef> crates_;
     DropTables drops_;
     int on_dash_ref{-1};
+    int on_active_reload_ref{-1};
+    int on_eject_ref{-1};
+    int on_reload_start_ref{-1};
+    int on_reload_finish_ref{-1};
 
 #ifdef GUB_ENABLE_LUA
     struct lua_State* L{nullptr};

@@ -5,6 +5,7 @@ Sounds (mods/base/sounds/)
 - base:jam => jam.wav (or .ogg) [fallback uses base:ui_cant]
 - base:pickup => pickup.wav (or .ogg) [fallback uses base:drop]
 - base:use => use.wav (or .ogg) [fallback uses base:ui_confirm]
+- base:ui_super_confirm => ui_super_confirm.wav (or .ogg) [used on active reload success; fallback to base:ui_confirm]
 
 Sprites (mods/base/graphics/)
 - base:armor_plate => armor_plate.png

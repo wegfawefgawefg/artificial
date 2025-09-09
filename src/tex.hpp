@@ -13,5 +13,7 @@ class TextureStore {
     SDL_Texture* get(int sprite_id) const;
 
   private:
+
+  
     std::unordered_map<int, SDL_Texture*> by_id_;
 };

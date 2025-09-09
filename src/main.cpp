@@ -443,7 +443,7 @@ init_ok:
                 }
             }
 
-            // Shield regeneration after delay (3s no damage) and gun reload completion
+            // Shield regeneration after delay (3s no damage) and active reload progress/completion
             for (auto& e : state.entities.data()) {
                 if (!e.active)
                     continue;
@@ -453,25 +453,33 @@ init_ok:
                         std::min(e.stats.shield_max, e.shield + e.stats.shield_regen * TIMESTEP);
                     (void)before;
                 }
-                // Reload completion (player only, for now)
+                // Active reload progress/completion (player only for now)
                 if (e.type_ == ids::ET_PLAYER && e.equipped_gun_vid.has_value()) {
                     if (auto* gi = state.guns.get(*e.equipped_gun_vid)) {
-                        if (gi->reload_timer > 0.0f) {
-                            gi->reload_timer = std::max(0.0f, gi->reload_timer - TIMESTEP);
-                            if (gi->reload_timer == 0.0f) {
-                                const GunDef* gd = nullptr;
-                                if (g_lua_mgr) {
-                                    for (auto const& g : g_lua_mgr->guns())
-                                        if (g.type == gi->def_type) {
-                                            gd = &g;
-                                            break;
-                                        }
-                                }
+                        if (gi->reloading) {
+                            const GunDef* gd = nullptr;
+                            if (g_lua_mgr) {
+                                for (auto const& g : g_lua_mgr->guns())
+                                    if (g.type == gi->def_type) {
+                                        gd = &g;
+                                        break;
+                                    }
+                            }
+                            if (gi->reload_eject_remaining > 0.0f) {
+                                gi->reload_eject_remaining =
+                                    std::max(0.0f, gi->reload_eject_remaining - TIMESTEP);
+                            } else if (gi->reload_total_time > 0.0f) {
+                                gi->reload_progress = std::min(
+                                    1.0f, gi->reload_progress + (TIMESTEP / gi->reload_total_time));
+                            }
+                            if (gi->reload_progress >= 1.0f) {
                                 if (gd && gi->ammo_reserve > 0) {
                                     int take = std::min(gd->mag, gi->ammo_reserve);
                                     gi->current_mag = take;
                                     gi->ammo_reserve -= take;
                                 }
+                                gi->reloading = false;
+                                gi->reload_progress = 0.0f;
                             }
                         }
                     }
@@ -968,7 +976,7 @@ init_ok:
                 }
             }
 
-            // Reload handling (R key): manual only, with per-gun reload_time
+            // Reload handling (R key): active reload system
             if (state.player_vid) {
                 auto* plm = state.entities.get_mut(*state.player_vid);
                 if (plm && plm->equipped_gun_vid.has_value()) {
@@ -986,14 +994,68 @@ init_ok:
                                     }
                             }
                             if (gd) {
-                                if (gim->ammo_reserve > 0) {
+                                if (gim->reloading) {
+                                    // Active reload attempt
+                                    float prog = gim->reload_progress;
+                                    if (gim->reload_total_time > 0.0f)
+                                        prog = gim->reload_progress; // already 0..1
+                                    if (!gim->ar_consumed && prog >= gim->ar_window_start &&
+                                        prog <= gim->ar_window_end) {
+                                        // Success: instant reload
+                                        int take = std::min(gd->mag, gim->ammo_reserve);
+                                        gim->current_mag = take;
+                                        gim->ammo_reserve -= take;
+                                        gim->reloading = false;
+                                        gim->reload_progress = 0.0f;
+                                        state.alerts.push_back(
+                                            {"Active Reload!", 0.0f, 1.2f, false});
+                                        state.reticle_shake = std::max(state.reticle_shake, 6.0f);
+                                        sounds.play("base:ui_super_confirm");
+                                        // Hooks: global, gun, items
+                                        if (g_lua_mgr) {
+                                            g_lua_mgr->call_on_active_reload(state, *plm);
+                                            g_lua_mgr->call_gun_on_active_reload(gim->def_type,
+                                                                                 state, *plm);
+                                            for (const auto& entry : state.inventory.entries) {
+                                                if (entry.kind == INV_ITEM) {
+                                                    if (const ItemInstance* inst =
+                                                            state.items.get(entry.vid)) {
+                                                        g_lua_mgr->call_item_on_active_reload(
+                                                            inst->def_type, state, *plm);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if (gim->ammo_reserve > 0) {
                                     int dropped = gim->current_mag;
                                     if (dropped > 0)
                                         state.alerts.push_back({std::string("Dropped ") +
                                                                     std::to_string(dropped) +
                                                                     " bullets",
                                                                 0.0f, 1.0f, false});
-                                    gim->reload_timer = std::max(0.1f, gd->reload_time);
+                                    gim->current_mag = 0;
+                                    // Start active reload sequence
+                                    gim->reloading = true;
+                                    gim->reload_progress = 0.0f;
+                                    gim->reload_eject_remaining = std::max(0.0f, gd->eject_time);
+                                    gim->reload_total_time = std::max(0.1f, gd->reload_time);
+                                    static thread_local std::mt19937 rng{std::random_device{}()};
+                                    auto clamp01 = [](float v) {
+                                        return std::max(0.0f, std::min(1.0f, v));
+                                    };
+                                    std::uniform_real_distribution<float> Upos(-gd->ar_pos_variance,
+                                                                               gd->ar_pos_variance);
+                                    std::uniform_real_distribution<float> Usize(
+                                        -gd->ar_size_variance, gd->ar_size_variance);
+                                    float size = std::clamp(gd->ar_size + Usize(rng), 0.02f, 0.9f);
+                                    float center = clamp01(gd->ar_pos + Upos(rng));
+                                    float start = clamp01(center - size * 0.5f);
+                                    if (start + size > 1.0f)
+                                        start = 1.0f - size;
+                                    gim->ar_window_start = start;
+                                    gim->ar_window_end = start + size;
+                                    gim->ar_consumed = false;
                                     sounds.play(gd->sound_reload.empty() ? "base:reload"
                                                                          : gd->sound_reload);
                                 } else {
@@ -1114,7 +1176,8 @@ init_ok:
                                 }
                             }
                             GunInstance* gim = state.guns.get(*plm->equipped_gun_vid);
-                            if (gim->jammed || gim->reload_timer > 0.0f) {
+                            if (gim->jammed || gim->reloading ||
+                                gim->reload_eject_remaining > 0.0f) {
                                 fired = false;
                             } else if (gim->current_mag > 0) {
                                 gim->current_mag -= 1;
@@ -1247,7 +1310,29 @@ init_ok:
                                                                     std::to_string(dropped) +
                                                                     " bullets",
                                                                 0.0f, 1.5f, false});
-                                    gim->reload_timer = std::max(0.1f, gd->reload_time);
+                                    // start active reload
+                                    gim->current_mag = 0;
+                                    gim->reloading = true;
+                                    gim->reload_progress = 0.0f;
+                                    gim->reload_eject_remaining = std::max(0.0f, gd->eject_time);
+                                    gim->reload_total_time = std::max(0.1f, gd->reload_time);
+                                    static thread_local std::mt19937 rng2{std::random_device{}()};
+                                    auto clamp01b = [](float v) {
+                                        return std::max(0.0f, std::min(1.0f, v));
+                                    };
+                                    std::uniform_real_distribution<float> Upos2(
+                                        -gd->ar_pos_variance, gd->ar_pos_variance);
+                                    std::uniform_real_distribution<float> Usize2(
+                                        -gd->ar_size_variance, gd->ar_size_variance);
+                                    float size2 =
+                                        std::clamp(gd->ar_size + Usize2(rng2), 0.02f, 0.9f);
+                                    float center2 = clamp01b(gd->ar_pos + Upos2(rng2));
+                                    float start2 = clamp01b(center2 - size2 * 0.5f);
+                                    if (start2 + size2 > 1.0f)
+                                        start2 = 1.0f - size2;
+                                    gim->ar_window_start = start2;
+                                    gim->ar_window_end = start2 + size2;
+                                    gim->ar_consumed = false;
                                     state.alerts.push_back(
                                         {"Unjammed: Reloading...", 0.0f, 1.0f, false});
                                     sounds.play("base:unjam");
@@ -2004,22 +2089,65 @@ init_ok:
                                 float res_ratio = (gd->ammo_max > 0) ? (float)gi->ammo_reserve /
                                                                            (float)gd->ammo_max
                                                                      : 0.0f;
-                                // mag bar
-                                SDL_Rect bg{rx, ry, bar_w, bar_h};
-                                SDL_SetRenderDrawColor(renderer, 40, 40, 50, 180);
-                                SDL_RenderFillRect(renderer, &bg);
-                                int fill_h = (int)std::lround((double)bar_h * (double)mag_ratio);
-                                SDL_Rect fg{rx, ry + (bar_h - fill_h), bar_w, fill_h};
-                                SDL_SetRenderDrawColor(renderer, 200, 240, 255, 220);
-                                SDL_RenderFillRect(renderer, &fg);
-                                // reserve sliver
-                                SDL_Rect bg2{rx + bar_w + gap, ry, 3, bar_h};
-                                SDL_SetRenderDrawColor(renderer, 40, 40, 50, 180);
-                                SDL_RenderFillRect(renderer, &bg2);
-                                int rfill = (int)std::lround((double)bar_h * (double)res_ratio);
-                                SDL_Rect rf{rx + bar_w + gap, ry + (bar_h - rfill), 3, rfill};
-                                SDL_SetRenderDrawColor(renderer, 180, 200, 200, 220);
-                                SDL_RenderFillRect(renderer, &rf);
+                                // no tilt rendering here
+                                bool reloading =
+                                    (gi->reloading || gi->reload_eject_remaining > 0.0f);
+                                if (!reloading) {
+                                    // mag bar
+                                    SDL_Rect bg{rx, ry, bar_w, bar_h};
+                                    SDL_SetRenderDrawColor(renderer, 40, 40, 50, 180);
+                                    SDL_RenderFillRect(renderer, &bg);
+                                    int fill_h =
+                                        (int)std::lround((double)bar_h * (double)mag_ratio);
+                                    SDL_Rect fg{rx, ry + (bar_h - fill_h), bar_w, fill_h};
+                                    SDL_SetRenderDrawColor(renderer, 200, 240, 255, 220);
+                                    SDL_RenderFillRect(renderer, &fg);
+                                    // reserve sliver
+                                    SDL_Rect bg2{rx + bar_w + gap, ry, 3, bar_h};
+                                    SDL_SetRenderDrawColor(renderer, 40, 40, 50, 180);
+                                    SDL_RenderFillRect(renderer, &bg2);
+                                    int rfill = (int)std::lround((double)bar_h * (double)res_ratio);
+                                    SDL_Rect rf{rx + bar_w + gap, ry + (bar_h - rfill), 3, rfill};
+                                    SDL_SetRenderDrawColor(renderer, 180, 200, 200, 220);
+                                    SDL_RenderFillRect(renderer, &rf);
+                                } else {
+                                    // non-tilted reload UI with growing progress rectangle
+                                    // mag background
+                                    SDL_Rect bg{rx, ry, bar_w, bar_h};
+                                    SDL_SetRenderDrawColor(renderer, 40, 40, 50, 180);
+                                    SDL_RenderFillRect(renderer, &bg);
+                                    // active window overlay
+                                    if (gi->reload_total_time > 0.0f) {
+                                        float ws = gi->ar_window_start, we = gi->ar_window_end;
+                                        ws = std::clamp(ws, 0.0f, 1.0f);
+                                        we = std::clamp(we, 0.0f, 1.0f);
+                                        int wy0 = ry + (int)std::lround((double)bar_h *
+                                                                        (double)(1.0f - we));
+                                        int wy1 = ry + (int)std::lround((double)bar_h *
+                                                                        (double)(1.0f - ws));
+                                        SDL_Rect win{rx - 2, wy0, bar_w + 6,
+                                                     std::max(2, wy1 - wy0)};
+                                        SDL_SetRenderDrawColor(renderer, 240, 220, 80, 120);
+                                        SDL_RenderFillRect(renderer, &win);
+                                        // progress rectangle grows from bottom of bar
+                                        int prg_h = (int)std::lround((double)bar_h *
+                                                                     (double)gi->reload_progress);
+                                        if (prg_h > 0) {
+                                            SDL_Rect prog{rx - 2, ry + (bar_h - prg_h), bar_w + 6,
+                                                          prg_h};
+                                            SDL_SetRenderDrawColor(renderer, 200, 240, 255, 200);
+                                            SDL_RenderFillRect(renderer, &prog);
+                                        }
+                                    }
+                                    // reserve sliver (unchanged)
+                                    SDL_Rect bg2{rx + bar_w + gap, ry, 3, bar_h};
+                                    SDL_SetRenderDrawColor(renderer, 40, 40, 50, 180);
+                                    SDL_RenderFillRect(renderer, &bg2);
+                                    int rfill = (int)std::lround((double)bar_h * (double)res_ratio);
+                                    SDL_Rect rf{rx + bar_w + gap, ry + (bar_h - rfill), 3, rfill};
+                                    SDL_SetRenderDrawColor(renderer, 180, 200, 200, 220);
+                                    SDL_RenderFillRect(renderer, &rf);
+                                }
                                 // text: RELOAD / NO AMMO when mag==0
                                 if (ui_font && gi->current_mag == 0) {
                                     const char* txt = (gi->ammo_reserve > 0) ? "RELOAD" : "NO AMMO";
