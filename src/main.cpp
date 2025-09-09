@@ -2855,8 +2855,8 @@ init_ok:
 
             // (alerts moved to top-layer rendering at end of frame)
 
-            // Inventory list (left column under alerts) – hidden if character panel shown
-            if (ui_font && !state.show_character_panel) {
+            // Inventory list (left column under alerts) – gameplay only, hidden if character panel shown
+            if (ui_font && state.mode == ids::MODE_PLAYING && !state.show_character_panel) {
                 int sx = 40;
                 int sy = 140;
                 int slot_h = 26;
@@ -2948,8 +2948,8 @@ init_ok:
                 }
             }
 
-            // Right-side selected item details panel
-            if (ui_font) {
+            // Right-side selected item details panel (gameplay only)
+            if (ui_font && state.mode == ids::MODE_PLAYING) {
                 const InvEntry* sel = state.inventory.selected_entry();
                 if (sel) {
                     int panel_w = (int)std::lround(width * 0.26);
@@ -3082,8 +3082,8 @@ init_ok:
                 }
             }
 
-            // Right-side gun panel (player's equipped)
-            if (ui_font && state.player_vid && g_lua_mgr) {
+            // Right-side gun panel (player's equipped) – gameplay only
+            if (ui_font && state.mode == ids::MODE_PLAYING && state.player_vid && g_lua_mgr) {
                 const Entity* ply = state.entities.get(*state.player_vid);
                 if (ply && ply->equipped_gun_vid.has_value()) {
                     // lookup gun def by type
