@@ -532,6 +532,9 @@ init_ok:
                                 }
                                 gi->reloading = false;
                                 gi->reload_progress = 0.0f;
+                                // Ensure pending burst doesn't resume after normal reload
+                                gi->burst_remaining = 0;
+                                gi->burst_timer = 0.0f;
                             }
                         }
                     }
@@ -1099,7 +1102,12 @@ init_ok:
                                         break;
                                     }
                             }
-                            if (gd) {
+                            // Do not allow reloading while jammed
+                            if (gim->jammed) {
+                                state.alerts.push_back({"Gun jammed! Mash SPACE", 0.0f, 1.2f, false});
+                                // Gentle feedback sound when trying to reload while jammed
+                                sounds.play("base:ui_cant");
+                            } else if (gd) {
                                 if (gim->reloading) {
                                     // Active reload attempt
                                     float prog = gim->reload_progress;
@@ -1113,6 +1121,9 @@ init_ok:
                                         gim->ammo_reserve -= take;
                                         gim->reloading = false;
                                         gim->reload_progress = 0.0f;
+                                        // Clear any pending burst so reload completion doesn't resume firing
+                                        gim->burst_remaining = 0;
+                                        gim->burst_timer = 0.0f;
                                         state.alerts.push_back(
                                             {"Active Reload!", 0.0f, 1.2f, false});
                                         state.reticle_shake = std::max(state.reticle_shake, 6.0f);
@@ -1184,6 +1195,12 @@ init_ok:
                                     gim->reload_progress = 0.0f;
                                     gim->reload_eject_remaining = std::max(0.0f, gd->eject_time);
                                     gim->reload_total_time = std::max(0.1f, gd->reload_time);
+                                    // Cancel any in-progress burst so it can't continue after reload
+                                    gim->burst_remaining = 0;
+                                    gim->burst_timer = 0.0f;
+                                    // Cancel any in-progress burst so it can't continue after reload
+                                    gim->burst_remaining = 0;
+                                    gim->burst_timer = 0.0f;
                                     static thread_local std::mt19937 rng{std::random_device{}()};
                                     auto clamp01 = [](float v) {
                                         return std::max(0.0f, std::min(1.0f, v));
@@ -1430,7 +1447,7 @@ init_ok:
                         static bool prev_space = false;
                         bool now_space = state.playing_inputs.use_center;
                         if (now_space && !prev_space) {
-                            state.reticle_shake = std::max(state.reticle_shake, 2.0f);
+                            state.reticle_shake = std::max(state.reticle_shake, 20.0f);
                             gim->unjam_progress = std::min(1.0f, gim->unjam_progress + 0.2f);
                         }
                         prev_space = now_space;
