@@ -101,6 +101,8 @@ struct State {
     // Character panel (left) and gun panel (right)
     bool show_character_panel{false};
     float character_panel_slide{0.0f}; // 0..1
+    // Short input suppression window (e.g., after page transitions) to avoid accidental fire
+    float input_lockout_timer{0.0f};
 
     // Metrics (per-stage). Designed for multi-player: per-player metrics keyed by entity slots.
     struct PlayerMetrics {
@@ -109,6 +111,7 @@ struct State {
         // Combat/accuracy
         std::uint32_t shots_fired{0};
         std::uint32_t shots_hit{0};
+        std::uint32_t enemies_slain{0};
         // Reloads
         std::uint32_t reloads{0};
         std::uint32_t active_reload_success{0};
@@ -116,6 +119,12 @@ struct State {
         // Jams
         std::uint32_t jams{0};
         std::uint32_t unjam_mashes{0};
+        // Damage
+        std::uint64_t damage_dealt{0};
+        std::uint64_t damage_taken_hp{0};
+        std::uint64_t damage_taken_shield{0};
+        std::uint32_t plates_gained{0};
+        std::uint32_t plates_consumed{0};
         // Mobility
         std::uint32_t dashes_used{0};
         float dash_distance{0.0f};
@@ -154,6 +163,19 @@ struct State {
             per_player.resize(max_players);
         }
     } metrics{};
+
+    // Stage review animation state
+    struct ReviewStat {
+        std::string label;
+        double target{0.0};
+        double value{0.0};
+        bool header{false}; // if true, show label only, no counting
+        bool done{false};
+    };
+    std::vector<ReviewStat> review_stats;
+    float review_next_stat_timer{0.0f};
+    float review_number_tick_timer{0.0f};
+    std::size_t review_revealed{0};
 
     // Helpers to fetch per-player metrics by VID
     PlayerMetrics* metrics_for(VID v) {

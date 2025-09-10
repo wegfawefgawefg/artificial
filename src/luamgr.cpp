@@ -94,6 +94,10 @@ static int l_api_add_plate(lua_State* Ls) {
         g_player_ctx->stats.plates += n;
         if (g_player_ctx->stats.plates < 0)
             g_player_ctx->stats.plates = 0;
+        if (g_state_ctx && n > 0) {
+            if (auto* pm = g_state_ctx->metrics_for(g_player_ctx->vid))
+                pm->plates_gained += (std::uint32_t)n;
+        }
     }
     return 0;
 }
@@ -482,6 +486,10 @@ bool LuaManager::register_api() {
             g_player_ctx->stats.plates += n;
             if (g_player_ctx->stats.plates < 0)
                 g_player_ctx->stats.plates = 0;
+            if (g_state_ctx && n > 0) {
+                if (auto* pm = g_state_ctx->metrics_for(g_player_ctx->vid))
+                    pm->plates_gained += (std::uint32_t)n;
+            }
         }
     });
     api.set_function("heal", [](int n) {
@@ -618,6 +626,7 @@ bool LuaManager::register_api() {
         auto w = nearest(t.x, t.y);
         glm::vec2 safe{(float)w.x + 0.5f, (float)w.y + 0.5f};
         g_state_ctx->crates.spawn(safe, type);
+        g_state_ctx->metrics.crates_spawned += 1;
     });
     api.set_function("spawn_crate_safe", [this](int type, float x, float y) {
         if (!g_state_ctx)
@@ -648,6 +657,7 @@ bool LuaManager::register_api() {
         auto w = nearest(t.x, t.y);
         glm::vec2 safe{(float)w.x + 0.5f, (float)w.y + 0.5f};
         g_state_ctx->crates.spawn(safe, type);
+        g_state_ctx->metrics.crates_spawned += 1;
     });
     api.set_function("spawn_item", [this](int type, int count, float x, float y) {
         if (!g_state_ctx || !g_mgr)
@@ -687,6 +697,7 @@ bool LuaManager::register_api() {
             auto w = nearest(t.x, t.y);
             glm::vec2 safe{(float)w.x + 0.5f, (float)w.y + 0.5f};
             g_state_ctx->ground_items.spawn(*iv, safe);
+            g_state_ctx->metrics.items_spawned += 1;
         }
     });
     api.set_function("spawn_gun", [this](int type, float x, float y) {
@@ -728,6 +739,7 @@ bool LuaManager::register_api() {
             glm::vec2 safe{(float)w.x + 0.5f, (float)w.y + 0.5f};
             int sid = -1;
             g_state_ctx->ground_guns.spawn(*gv, safe, sid);
+            g_state_ctx->metrics.guns_spawned += 1;
         }
     });
     return true;
