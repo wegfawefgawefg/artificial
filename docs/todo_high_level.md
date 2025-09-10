@@ -13,6 +13,11 @@ High-Level TODO
 - Rooms/Pages: Split world render from pages; add Stage Review and Next Area pages with metrics and next-room details; click/space to continue.
 - Rooms/Rotation: Add 3-room loop (Prep → Arena → Gauntlet) with simple generators.
 - Decor: Add non-interactable decorations (z-sorted by Y); Lua placement API.
+
+Entity & Ammo Systems
+- Entity Type Defs (Lua): register entity types (player/classes/NPCs) with base stats including movement inaccuracy dynamics (inc/decay/max), accuracy, shield/armor, etc.; assign entities a type.
+- Ammo Type Defs (Lua): define ammunition families + variants with stats/modifiers (damage, AP, speed, falloff, crit mods, shield/headshot/boss modifiers, ricochet/shrapnel profiles, bounce caps, range/lifespan/acceleration); expose curves for distance→multiplier (falloff).
+- Gun ↔ Ammo Compatibility: guns list compatible ammo types; inventory/loader picks the active ammo; UI shows current ammo and effects.
 - Cleanup & Tooling: Trim legacy paths; ASan/UBSan preset; small logging helper.
 
 Ticking (Opt-in) Roadmap

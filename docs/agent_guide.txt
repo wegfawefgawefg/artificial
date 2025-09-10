@@ -46,7 +46,10 @@ Current Behavior
 - Entities: ~25 NPCs spawn and wander; player + NPC sprites if found under mods/base/graphics/.
 - Projectiles: Left click fires toward mouse; per‑object physics_steps=2; NPCs can die and drop powerups/items/guns via Lua‑defined weighted tables.
 - Input remap: Reads config/input.ini (key=value). Pickup key default is F (legacy E still works).
-- UI: Pickup prompt when overlapping; inventory panel with hotkeys 1–0 and item details; basic gun equip/use logic.
+- UI: Pickup prompt when overlapping; inventory panel with hotkeys 1–0 and drag‑and‑drop reordering; basic gun equip/use logic.
+- Ammo system: Guns declare `compatible_ammo` (weighted). Ammo is chosen at gun spawn (or set via API). Ammo provides projectile sprite/size/speed and damage behavior: damage_mult, armor_pen (entities only), shield_mult, range + linear falloff, and entity pierce_count. Ammo hooks fire on hit events.
+- Right gun panel (toggle with V): full gun + ammo stats (2‑dec formatted) and sprites.
+- Center hover panel: hovering an inventory slot after a short delay (~0.12s) shows detailed info. If standing on a ground item/gun and V is ON, shows that target’s inspect panel too.
 
 Physics and Collisions
 ----------------------
@@ -67,9 +70,10 @@ IDs, Data, and Moddability Philosophy
     graphics/, sounds/, music/
     scripts/ (Lua): free‑form (e.g., content.lua)
 - Lua API (current):
-  - register_powerup, register_item, register_gun
+  - register_powerup, register_item, register_gun, register_ammo
   - Item callbacks: on_use, on_tick(dt), on_shoot, on_damage(attacker_ap)
   - api helpers: add_plate, heal, add_move_speed
+  - Ammo swap: api.set_equipped_ammo(type), api.set_equipped_ammo_force(type)
 - Load order: base mod first; simple directory scan today.
 
 Input Remapping (.ini)
@@ -115,7 +119,8 @@ Open Work
 - Settings persistence: write .ini changes from in‑game menu.
 - Clean up legacy C API path once sol2 is standard.
 - See docs/todo_high_level.md and docs/todo_low_level.md for details.
- - Pages/Rooms: Stage Review and Next Area pages (no HUD/world in background), metrics display, next-room details; 3-room loop and decorations (see stages_and_decorations.md).
+- Pages/Rooms: Stage Review and Next Area pages (no HUD/world in background), metrics display, next-room details; 3-room loop and decorations (see stages_and_decorations.md).
+- Entity Types & Ammo (planned): Lua entity type defs for base stats (incl. movement inaccuracy rates/caps), and Lua ammo defs with gun compatibility, damage/AP/speed/falloff/ricochet/shrapnel.
 
 Local Run Book (quick)
 ----------------------

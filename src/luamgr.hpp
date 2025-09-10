@@ -42,6 +42,7 @@ struct ItemDef {
     int on_reload_start_ref{-1};
     int on_reload_finish_ref{-1};
 };
+struct AmmoCompat { int type{0}; float weight{1.0f}; };
 struct GunDef {
     std::string name;
     int type = 0;
@@ -50,6 +51,7 @@ struct GunDef {
     float deviation = 0.0f; // base angular deviation (degrees)
     float recoil = 0.0f;
     float control = 0.0f;
+    float max_recoil_spread_deg{12.0f};
     int pellets_per_shot{1};
     int mag = 0;
     int ammo_max = 0;
@@ -87,6 +89,8 @@ struct GunDef {
     int on_eject_ref{-1};
     int on_reload_start_ref{-1};
     int on_reload_finish_ref{-1};
+    // Ammo compatibility (weighted pick on spawn)
+    std::vector<AmmoCompat> compatible_ammo; // {type, weight}
 };
 
 struct ProjectileDef {
@@ -96,6 +100,31 @@ struct ProjectileDef {
     float size_x = 0.2f, size_y = 0.2f;
     int physics_steps = 2;
     std::string sprite; // namespaced sprite key (e.g., "mod:bullet")
+    int on_hit_entity_ref{-1};
+    int on_hit_tile_ref{-1};
+};
+
+// Ammo definitions (Lua)
+struct AmmoDef {
+    std::string name;
+    int type = 0;
+    std::string desc;
+    // Visuals / kinematics
+    std::string sprite;   // namespaced sprite key for projectile
+    float size_x{0.2f}, size_y{0.2f};
+    float speed{20.0f};   // projectile speed (world units/sec)
+    // Damage model
+    float damage_mult{1.0f};   // scales gun base damage
+    float armor_pen{0.0f};     // 0..1 fraction of armor ignored
+    float shield_mult{1.0f};   // multiplier vs shields
+    // Range / falloff
+    float range_units{0.0f};        // 0 => unlimited
+    float falloff_start{0.0f};      // distance where falloff begins
+    float falloff_end{0.0f};        // distance where falloff reaches min
+    float falloff_min_mult{1.0f};   // min damage multiplier at/after falloff_end
+    int pierce_count{0};            // number of entities to pierce through
+    // Optional hooks
+    int on_hit_ref{-1};
     int on_hit_entity_ref{-1};
     int on_hit_tile_ref{-1};
 };
@@ -155,6 +184,10 @@ class LuaManager {
     void call_projectile_on_hit_entity(int proj_type);
     void call_projectile_on_hit_tile(int proj_type);
     void call_crate_on_open(int crate_type, State& state, struct Entity& player);
+    // Ammo hook calls
+    void call_ammo_on_hit(int ammo_type);
+    void call_ammo_on_hit_entity(int ammo_type);
+    void call_ammo_on_hit_tile(int ammo_type);
     void call_on_dash(State& state, struct Entity& player);
     void call_on_step(State& state, struct Entity* player);
     void call_on_active_reload(State& state, struct Entity& player);
@@ -203,6 +236,13 @@ class LuaManager {
     const DropTables& drops() const {
         return drops_;
     }
+    const std::vector<AmmoDef>& ammo() const { return ammo_; }
+    const AmmoDef* find_ammo(int type) const {
+        for (auto const& a : ammo_)
+            if (a.type == type)
+                return &a;
+        return nullptr;
+    }
     const std::vector<CrateDef>& crates() const {
         return crates_;
     }
@@ -220,6 +260,7 @@ class LuaManager {
     void add_projectile(const ProjectileDef& d) {
         projectiles_.push_back(d);
     }
+    void add_ammo(const AmmoDef& d) { ammo_.push_back(d); }
     void add_crate(const CrateDef& d) {
         crates_.push_back(d);
     }
@@ -233,6 +274,7 @@ class LuaManager {
     std::vector<ItemDef> items_;
     std::vector<GunDef> guns_;
     std::vector<ProjectileDef> projectiles_;
+    std::vector<AmmoDef> ammo_;
     std::vector<CrateDef> crates_;
     DropTables drops_;
     int on_dash_ref{-1};

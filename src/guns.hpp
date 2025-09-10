@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <vector>
+#include <random>
 
 struct GunInstance {
     bool active{false};
@@ -30,6 +31,8 @@ struct GunInstance {
   bool ar_failed_attempt{false};
   // Optional ticking accumulator (opt-in via def.tick_rate_hz)
   float tick_acc{0.0f};
+  // Selected ammo type (Lua AmmoDef::type). 0 means unset/default.
+  int ammo_type{0};
 };
 
 class GunsPool : public Pool<GunInstance, 1024> {
@@ -43,6 +46,23 @@ class GunsPool : public Pool<GunInstance, 1024> {
             gi->current_mag = d.mag;
             gi->ammo_reserve = d.ammo_max;
             gi->heat = 0.0f;
+            // Pick ammo on gun generation if compat list provided
+            gi->ammo_type = 0;
+            if (!d.compatible_ammo.empty()) {
+                static thread_local std::mt19937 rng{std::random_device{}()};
+                float sum = 0.0f;
+                for (auto const& ac : d.compatible_ammo) sum += ac.weight;
+                if (sum > 0.0f) {
+                    std::uniform_real_distribution<float> du(0.0f, sum);
+                    float r = du(rng), acc = 0.0f;
+                    for (auto const& ac : d.compatible_ammo) {
+                        acc += ac.weight;
+                        if (r <= acc) { gi->ammo_type = ac.type; break; }
+                    }
+                    if (gi->ammo_type == 0)
+                        gi->ammo_type = d.compatible_ammo.back().type;
+                }
+            }
         }
         return v;
     }

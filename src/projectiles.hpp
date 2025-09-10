@@ -18,6 +18,14 @@ struct Projectile {
     int physics_steps{1};
     std::optional<VID> owner{};
     int def_type{0};
+    // Ammo context
+    int ammo_type{0};
+    float base_damage{1.0f};
+    float armor_pen{0.0f}; // 0..1
+    float shield_mult{1.0f};
+    float distance_travelled{0.0f};
+    float max_range_units{0.0f}; // 0 => unlimited
+    int pierce_remaining{0}; // entities this projectile can still pass through
 };
 
 class Projectiles {
@@ -35,6 +43,13 @@ class Projectiles {
                 pr.size = sz;
                 pr.physics_steps = steps;
                 pr.def_type = def_type;
+                pr.distance_travelled = 0.0f;
+                pr.max_range_units = 0.0f;
+                pr.ammo_type = 0;
+                pr.base_damage = 1.0f;
+                pr.armor_pen = 0.0f;
+                pr.shield_mult = 1.0f;
+                pr.pierce_remaining = 0;
                 return &pr;
             }
         }
@@ -55,6 +70,12 @@ class Projectiles {
             int steps = std::max(1, pr.physics_steps);
             glm::vec2 step_dpos = pr.vel * (dt / static_cast<float>(steps));
             for (int s = 0; s < steps; ++s) {
+                // Range check: accumulate distance and expire if over range
+                pr.distance_travelled += std::sqrt(step_dpos.x * step_dpos.x + step_dpos.y * step_dpos.y);
+                if (pr.max_range_units > 0.0f && pr.distance_travelled >= pr.max_range_units) {
+                    pr.active = false;
+                    break;
+                }
                 // Separate-axis move for projectiles
                 glm::vec2 next = pr.pos;
                 // X axis
@@ -105,7 +126,7 @@ class Projectiles {
                 }
                 if (!pr.active)
                     break;
-                // entity hit
+                // entity hit (allow piercing through multiple entities)
                 for (auto const& e : ents) {
                     if (!e.active)
                         continue;
@@ -119,9 +140,11 @@ class Projectiles {
                     glm::vec2 br = pr.pos + half;
                     bool overlap = !(br.x < etl.x || tl.x > ebr.x || br.y < etl.y || tl.y > ebr.y);
                     if (overlap) {
-                        on_hit(pr, e);
-                        pr.active = false;
-                        break;
+                        bool stop = on_hit(pr, e); // on_hit returns true to stop, false to continue (pierce)
+                        if (stop) {
+                            pr.active = false;
+                            break;
+                        }
                     }
                 }
                 if (!pr.active)

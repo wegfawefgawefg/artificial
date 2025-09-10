@@ -23,11 +23,42 @@
 #include <random>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 // Helpers
 struct Projectiles; // fwd
 static void generate_room(State& state, Projectiles& projectiles, SDL_Renderer* renderer,
                           Graphics& gfx);
+// UI helpers
+namespace {
+static inline std::string fmt2(float v) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.2f", (double)v);
+    return std::string(buf);
+}
+static inline void ui_draw_kv_line(SDL_Renderer* renderer, TTF_Font* font,
+                                   int tx, int& ty, int lh,
+                                   const char* key, const std::string& value,
+                                   SDL_Color key_color = SDL_Color{150,150,150,255},
+                                   SDL_Color val_color = SDL_Color{230,230,230,255}) {
+    // key
+    SDL_Surface* ks = TTF_RenderUTF8_Blended(font, (std::string(key)+": ").c_str(), key_color);
+    int keyw=0,keyh=0; SDL_Texture* kt=nullptr;
+    if (ks) { kt = SDL_CreateTextureFromSurface(renderer, ks);
+        SDL_QueryTexture(kt,nullptr,nullptr,&keyw,&keyh);
+        SDL_Rect kd{tx, ty, keyw, keyh}; SDL_RenderCopy(renderer, kt, nullptr, &kd);
+        SDL_DestroyTexture(kt); SDL_FreeSurface(ks);
+    }
+    // value
+    SDL_Surface* vs = TTF_RenderUTF8_Blended(font, value.c_str(), val_color);
+    if (vs) { SDL_Texture* vt = SDL_CreateTextureFromSurface(renderer, vs);
+        int vw=0,vh=0; SDL_QueryTexture(vt,nullptr,nullptr,&vw,&vh);
+        SDL_Rect vd{tx+keyw, ty, vw, vh}; SDL_RenderCopy(renderer, vt, nullptr, &vd);
+        SDL_DestroyTexture(vt); SDL_FreeSurface(vs);
+    }
+    ty += lh;
+}
+}
 static LuaManager* g_lua_mgr = nullptr;
 static SpriteIdRegistry* g_sprite_ids = nullptr;
 static bool tile_blocks_entity(const State& state, int x, int y);
@@ -431,11 +462,11 @@ init_ok:
                         // Normalize by baseline player speed in world units/sec
                         float factor = std::clamp(spd / PLAYER_SPEED_UNITS_PER_SEC, 0.0f, 4.0f);
                         if (factor > 0.01f) {
-                            e.move_spread_deg = std::min(MAX_SPREAD_DEG,
-                                e.move_spread_deg + MOVE_SPREAD_INCREASE_DEG_PER_SEC_AT_BASE_SPEED * factor * TIMESTEP);
+                            e.move_spread_deg = std::min(e.stats.move_spread_max_deg,
+                                e.move_spread_deg + e.stats.move_spread_inc_rate_deg_per_sec_at_base * factor * TIMESTEP);
                         } else {
                             e.move_spread_deg = std::max(0.0f,
-                                e.move_spread_deg - MOVE_SPREAD_DECAY_DEG_PER_SEC * TIMESTEP);
+                                e.move_spread_deg - e.stats.move_spread_decay_deg_per_sec * TIMESTEP);
                         }
                     }
                     if (state.dash_timer > 0.0f) {
@@ -1543,6 +1574,7 @@ init_ok:
                 glm::vec2 proj_size{0.2f, 0.2f};
                 int proj_steps = 2;
                 int proj_sprite_id = -1;
+                int ammo_type = 0;
                 if (state.player_vid) {
                     auto* plm = state.entities.get_mut(*state.player_vid);
                     if (plm && plm->equipped_gun_vid.has_value()) {
@@ -1568,6 +1600,19 @@ init_ok:
                                     if (!pd->sprite.empty() &&
                                         pd->sprite.find(':') != std::string::npos && g_sprite_ids) {
                                         proj_sprite_id = g_sprite_ids->try_get(pd->sprite);
+                                    }
+                                }
+                            }
+                            // Ammo type selected on gun generation
+                            ammo_type = gi->ammo_type;
+                            // Apply ammo overrides
+                            if (g_lua_mgr && ammo_type != 0) {
+                                if (auto const* ad = g_lua_mgr->find_ammo(ammo_type)) {
+                                    if (ad->speed > 0.0f) proj_speed = ad->speed;
+                                    proj_size = {ad->size_x, ad->size_y};
+                                    if (!ad->sprite.empty() && ad->sprite.find(':') != std::string::npos && g_sprite_ids) {
+                                        int sid = g_sprite_ids->try_get(ad->sprite);
+                                        if (sid >= 0) proj_sprite_id = sid;
                                     }
                                 }
                             }
@@ -1624,8 +1669,10 @@ init_ok:
                                     pm->shots_fired += 1;
                             }
                             // Accumulate recoil spread on shot
-                            if (fired && gd && gim)
-                                gim->spread_recoil_deg += gd->recoil;
+                            if (fired && gd && gim) {
+                                gim->spread_recoil_deg = std::min(gim->spread_recoil_deg + gd->recoil,
+                                                                 gd->max_recoil_spread_deg);
+                            }
                         }
                     }
                 }
@@ -1679,8 +1726,39 @@ init_ok:
                         auto* pr = projectiles.spawn(sp, pdir * proj_speed, proj_size, proj_steps, proj_type);
                         if (pr && state.player_vid)
                             pr->owner = state.player_vid;
-                        if (pr)
+                        if (pr) {
                             pr->sprite_id = proj_sprite_id;
+                            pr->ammo_type = ammo_type;
+                            // Base damage from gun, scaled by ammo (if any)
+                            float base_dmg = 1.0f;
+                            if (g_lua_mgr && state.player_vid) {
+                                // resolve gun def again for damage
+                                if (auto* plmm = state.entities.get_mut(*state.player_vid)) {
+                                    if (plmm->equipped_gun_vid.has_value()) {
+                                        if (const GunInstance* gi2 = state.guns.get(*plmm->equipped_gun_vid)) {
+                                            const GunDef* gd2 = nullptr;
+                                            for (auto const& g : g_lua_mgr->guns()) if (g.type == gi2->def_type) { gd2 = &g; break; }
+                                            if (gd2) base_dmg = gd2->damage;
+                                        }
+                                    }
+                                }
+                            }
+                            float dmg_mult = 1.0f, armor_pen = 0.0f, shield_mult = 1.0f, range_units = 0.0f;
+                            if (g_lua_mgr && ammo_type != 0) {
+                                if (auto const* ad = g_lua_mgr->find_ammo(ammo_type)) {
+                                    dmg_mult = ad->damage_mult;
+                                    armor_pen = ad->armor_pen;
+                                    shield_mult = ad->shield_mult;
+                                    range_units = ad->range_units;
+                                    if (pr)
+                                        pr->pierce_remaining = std::max(0, ad->pierce_count);
+                                }
+                            }
+                            pr->base_damage = base_dmg * dmg_mult;
+                            pr->armor_pen = armor_pen;
+                            pr->shield_mult = shield_mult;
+                            pr->max_range_units = range_units;
+                        }
                         (void)pr;
                     }
                     // play fire sound (gun-specific or fallback)
@@ -1820,23 +1898,44 @@ init_ok:
             }
 
             // step projectiles with on-hit applying damage and drops
-            struct HitInfo { std::size_t eid; std::optional<VID> owner; };
+            struct HitInfo {
+                std::size_t eid;
+                std::optional<VID> owner;
+                float base_damage;
+                float armor_pen;      // 0..1
+                float shield_mult;
+                int ammo_type;
+                float travel_dist;
+                int proj_def_type;
+            };
             std::vector<HitInfo> hits;
             projectiles.step(
                 TIMESTEP, state.stage, state.entities.data(),
-                [&](Projectile& pr, const Entity& hit) {
+                [&](Projectile& pr, const Entity& hit) -> bool {
                     if (g_lua_mgr && pr.def_type)
                         g_lua_mgr->call_projectile_on_hit_entity(pr.def_type);
+                    if (g_lua_mgr && pr.ammo_type)
+                        g_lua_mgr->call_ammo_on_hit_entity(pr.ammo_type), g_lua_mgr->call_ammo_on_hit(pr.ammo_type);
                     // Attribute hit to owner for accuracy metrics
                     if (pr.owner) {
                         if (auto* pm = state.metrics_for(*pr.owner))
                             pm->shots_hit += 1;
                     }
-                    hits.push_back(HitInfo{hit.vid.id, pr.owner});
+                    hits.push_back(HitInfo{hit.vid.id, pr.owner, pr.base_damage, pr.armor_pen,
+                                            pr.shield_mult, pr.ammo_type, pr.distance_travelled,
+                                            pr.def_type});
+                    bool stop = true;
+                    if (pr.pierce_remaining > 0) {
+                        pr.pierce_remaining -= 1;
+                        stop = false;
+                    }
+                    return stop;
                 },
                 [&](Projectile& pr) {
                     if (g_lua_mgr && pr.def_type)
                         g_lua_mgr->call_projectile_on_hit_tile(pr.def_type);
+                    if (g_lua_mgr && pr.ammo_type)
+                        g_lua_mgr->call_ammo_on_hit_tile(pr.ammo_type), g_lua_mgr->call_ammo_on_hit(pr.ammo_type);
                 });
             for (auto h : hits) {
                 auto id = h.eid;
@@ -1850,13 +1949,33 @@ init_ok:
                         e.health = 3; // initialize default
                     if (e.max_hp == 0)
                         e.max_hp = 3;
-                    // Apply damage with plates and armor
-                    int dmg = 1;
-                    int ap = 0;
+                    // Apply damage with shields, plates, armor using projectile/ammo parameters
+                    float dmg = h.base_damage;
+                    float ap = std::clamp(h.armor_pen * 100.0f, 0.0f, 100.0f);
+                    float shield_mult = h.shield_mult;
+                    // Apply distance falloff from ammo if defined
+                    if (g_lua_mgr && h.ammo_type != 0) {
+                        if (auto const* ad = g_lua_mgr->find_ammo(h.ammo_type)) {
+                            if (ad->falloff_end > ad->falloff_start && ad->falloff_end > 0.0f) {
+                                float m = 1.0f;
+                                if (h.travel_dist <= ad->falloff_start) m = 1.0f;
+                                else if (h.travel_dist >= ad->falloff_end) m = ad->falloff_min_mult;
+                                else {
+                                    float t = (h.travel_dist - ad->falloff_start) / (ad->falloff_end - ad->falloff_start);
+                                    m = 1.0f + t * (ad->falloff_min_mult - 1.0f);
+                                }
+                                if (m < 0.0f) m = 0.0f;
+                                dmg *= m;
+                            }
+                        }
+                    }
+                    // Fallback damage if none resolved
+                    if (dmg <= 0.0f)
+                        dmg = 1.0f;
                     if (e.type_ == ids::ET_PLAYER) {
                         // For players: shields first, then plates, then HP with armor
                         if (e.stats.shield_max > 0.0f && e.shield > 0.0f) {
-                            float took = std::min(e.shield, (float)dmg);
+                            float took = std::min(e.shield, (float)(dmg * shield_mult));
                             e.shield -= took;
                             // metrics: damage to shield
                             if (auto* pm = state.metrics_for(e.vid))
@@ -1866,18 +1985,18 @@ init_ok:
                                 if (auto* om = state.metrics_for(*h.owner))
                                     om->damage_dealt += (std::uint64_t)std::lround(took);
                             }
-                            dmg -= (int)std::lround(took);
-                            if (dmg < 0)
-                                dmg = 0;
+                            dmg -= took; // remaining damage continues to plates/HP
+                            if (dmg < 0.0f)
+                                dmg = 0.0f;
                         }
-                        if (dmg > 0 && e.stats.plates > 0) {
+                        if (dmg > 0.0f && e.stats.plates > 0) {
                             e.stats.plates -= 1;
                             // metrics: plate consumed
                             if (auto* pm = state.metrics_for(e.vid))
                                 pm->plates_consumed += 1;
-                            dmg = 0;
+                            dmg = 0.0f;
                         }
-                        if (dmg > 0) {
+                        if (dmg > 0.0f) {
                             float reduction = std::max(0.0f, e.stats.armor - (float)ap);
                             reduction = std::min(75.0f, reduction);
                             float scale = 1.0f - reduction * 0.01f;
@@ -1897,9 +2016,9 @@ init_ok:
                         // NPC path (existing logic)
                         if (e.stats.plates > 0) {
                             e.stats.plates -= 1;
-                            dmg = 0;
+                            dmg = 0.0f;
                         }
-                        if (dmg > 0) {
+                        if (dmg > 0.0f) {
                             float reduction = std::max(0.0f, e.stats.armor - (float)ap);
                             reduction = std::min(75.0f, reduction); // cap benefit
                             float scale = 1.0f - reduction * 0.01f;
@@ -2723,6 +2842,90 @@ init_ok:
                         SDL_DestroyTexture(t);
                         SDL_FreeSurface(s);
                     }
+                    // Center inspect view for ground target when gun panel toggle (V) is on
+                    if (state.show_gun_panel) {
+                        int panel_w = (int)std::lround(width * 0.32);
+                        int px = (width - panel_w) / 2;
+                        int py = (int)std::lround(height * 0.22);
+                        SDL_Rect box{px, py, panel_w, 420};
+                        SDL_SetRenderDrawColor(renderer, 25, 25, 30, 220);
+                        SDL_RenderFillRect(renderer, &box);
+                        SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255);
+                        SDL_RenderDrawRect(renderer, &box);
+                        int tx = px + 12;
+                        int ty = py + 12;
+                        int lh = 18;
+                        // (no extra helpers here)
+                        // (helpers removed; use global ui_draw_kv_line/fmt2)
+                        if (best_kind == PK::Item) {
+                            auto const& gi = state.ground_items.data()[best_idx];
+                            const ItemInstance* inst = state.items.get(gi.item_vid);
+                            std::string iname = "item";
+                            std::string idesc;
+                            bool consume = false;
+                            int sid = -1;
+                            if (g_lua_mgr && inst) {
+                                for (auto const& ddf : g_lua_mgr->items())
+                                    if (ddf.type == inst->def_type) {
+                                        iname = ddf.name;
+                                        idesc = ddf.desc;
+                                        consume = ddf.consume_on_use;
+                                        if (!ddf.sprite.empty() && ddf.sprite.find(':') != std::string::npos && g_sprite_ids)
+                                            sid = g_sprite_ids->try_get(ddf.sprite);
+                                        break;
+                                    }
+                            }
+                            if (sid >= 0) if (SDL_Texture* texi = textures.get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, texi, nullptr, &dst); ty += 36; }
+                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Item", iname);
+                            if (!idesc.empty()) ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Desc", idesc);
+                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Consumable", consume ? std::string("Yes") : std::string("No"));
+                        } else if (best_kind == PK::Gun) {
+                            auto const& gg = state.ground_guns.data()[best_idx];
+                            const GunInstance* gim = state.guns.get(gg.gun_vid);
+                            const GunDef* gdp = nullptr;
+                            if (g_lua_mgr && gim) {
+                                for (auto const& gdf : g_lua_mgr->guns()) if (gdf.type == gim->def_type) { gdp = &gdf; break; }
+                            }
+                            if (gdp) {
+                                int gun_sid = -1;
+                                if (!gdp->sprite.empty() && g_sprite_ids) gun_sid = g_sprite_ids->try_get(gdp->sprite);
+                                if (gun_sid >= 0) if (SDL_Texture* texg = textures.get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, texg, nullptr, &dst); ty += 44; }
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Gun", gdp->name);
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Damage", std::to_string((int)std::lround(gdp->damage)));
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "RPM", std::to_string((int)std::lround(gdp->rpm)));
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Deviation", fmt2(gdp->deviation) + " deg");
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Pellets", std::to_string(gdp->pellets_per_shot));
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Recoil", fmt2(gdp->recoil));
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Control", fmt2(gdp->control));
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gdp->max_recoil_spread_deg)) + " deg");
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Reload/Eject", std::to_string((int)std::lround(gdp->reload_time * 1000.0f)) + "/" + std::to_string((int)std::lround(gdp->eject_time * 1000.0f)) + " ms");
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Jam", std::to_string((int)std::lround(gdp->jam_chance * 100.0f)) + " %");
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AR Center", fmt2(gdp->ar_pos) + " ±" + fmt2(gdp->ar_pos_variance));
+                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AR Size", fmt2(gdp->ar_size) + " ±" + fmt2(gdp->ar_size_variance));
+                                if (gim && gim->ammo_type != 0) {
+                                    if (auto const* ad = g_lua_mgr->find_ammo(gim->ammo_type)) {
+                                        int asid = (!ad->sprite.empty() && g_sprite_ids) ? g_sprite_ids->try_get(ad->sprite) : -1;
+                                        if (asid >= 0) if (SDL_Texture* texa = textures.get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, texa, nullptr, &dst); ty += 22; }
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Ammo", ad->name);
+                                        if (!ad->desc.empty()) ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Desc", ad->desc);
+                                        int apct = (int)std::lround(ad->armor_pen * 100.0f);
+                                        int save_tx2 = tx; tx += 10;
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "DMG", fmt2(ad->damage_mult));
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AP", std::to_string(apct) + "%");
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Shield", fmt2(ad->shield_mult));
+                                        if (ad->range_units > 0.0f) {
+                                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
+                                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
+                                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
+                                        }
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
+                                        tx = save_tx2;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             // draw projectiles (prefer sprite; fallback to red rect)
@@ -3240,6 +3443,8 @@ init_ok:
                 int sy = 140;
                 int slot_h = 26;
                 int slot_w = 220;
+                struct HoverSlot { SDL_Rect r; std::size_t index; };
+                std::vector<HoverSlot> inv_hover_rects;
                 // Draw 10 slots
                 for (int i = 0; i < 10; ++i) {
                     bool selected = (state.inventory.selected_index == (std::size_t)i);
@@ -3263,21 +3468,42 @@ init_ok:
                         SDL_DestroyTexture(ht);
                         SDL_FreeSurface(hs);
                     }
-                    // entry text
+                    // entry text + icon
                     const InvEntry* ent = state.inventory.get((std::size_t)i);
                     if (ent) {
+                        inv_hover_rects.push_back(HoverSlot{slot, (std::size_t)i});
+                        int icon_w = slot_h - 8;
+                        int icon_h = slot_h - 8;
+                        int icon_x = slot.x + 6;
+                        int icon_y = slot.y + 3;
+                        int label_x = slot.x + 8;
                         std::string label;
+                        int label_offset = 0;
+                        auto draw_icon = [&](int sprite_id) {
+                            if (sprite_id >= 0) {
+                                SDL_Texture* tex = textures.get(sprite_id);
+                                if (tex) {
+                                    SDL_Rect dst{icon_x, icon_y, icon_w, icon_h};
+                                    SDL_RenderCopy(renderer, tex, nullptr, &dst);
+                                    label_offset = icon_w + 10;
+                                }
+                            }
+                        };
                         if (ent->kind == INV_ITEM) {
                             if (const ItemInstance* inst = state.items.get(ent->vid)) {
                                 std::string nm = "item";
                                 uint32_t count = inst->count;
+                                int sid = -1;
                                 if (g_lua_mgr) {
                                     for (auto const& d : g_lua_mgr->items())
                                         if (d.type == inst->def_type) {
                                             nm = d.name;
+                                            if (!d.sprite.empty() && d.sprite.find(':') != std::string::npos && g_sprite_ids)
+                                                sid = g_sprite_ids->try_get(d.sprite);
                                             break;
                                         }
                                 }
+                                draw_icon(sid);
                                 label = nm;
                                 if (count > 1)
                                     label += std::string(" x") + std::to_string(count);
@@ -3285,13 +3511,17 @@ init_ok:
                         } else if (ent->kind == INV_GUN) {
                             if (const GunInstance* gi = state.guns.get(ent->vid)) {
                                 std::string nm = "gun";
+                                int sid = -1;
                                 if (g_lua_mgr) {
                                     for (auto const& g : g_lua_mgr->guns())
                                         if (g.type == gi->def_type) {
                                             nm = g.name;
+                                            if (!g.sprite.empty() && g.sprite.find(':') != std::string::npos && g_sprite_ids)
+                                                sid = g_sprite_ids->try_get(g.sprite);
                                             break;
                                         }
                                 }
+                                draw_icon(sid);
                                 label = nm;
                             }
                         }
@@ -3302,7 +3532,7 @@ init_ok:
                                 SDL_Texture* tt = SDL_CreateTextureFromSurface(renderer, ts);
                                 int tw = 0, th = 0;
                                 SDL_QueryTexture(tt, nullptr, nullptr, &tw, &th);
-                                SDL_Rect d{slot.x + 8, slot.y + 2, tw, th};
+                                SDL_Rect d{label_x + label_offset, slot.y + 2, tw, th};
                                 SDL_RenderCopy(renderer, tt, nullptr, &d);
                                 SDL_DestroyTexture(tt);
                                 SDL_FreeSurface(ts);
@@ -3325,10 +3555,169 @@ init_ok:
                         SDL_FreeSurface(hs);
                     }
                 }
+                // Hover info panel (center) if mouse over a slot with content
+                SDL_Point mp{state.mouse_inputs.pos.x, state.mouse_inputs.pos.y};
+                std::optional<std::size_t> hover_index{};
+                for (auto const& hs : inv_hover_rects) {
+                    if (mp.x >= hs.r.x && mp.x <= (hs.r.x + hs.r.w) && mp.y >= hs.r.y && mp.y <= (hs.r.y + hs.r.h)) {
+                        hover_index = hs.index;
+                        break;
+                    }
+                }
+                // Hover delay (fast)
+                if (hover_index.has_value()) {
+                    if (state.inv_hover_index == (int)*hover_index) state.inv_hover_time += (float)dt_sec; else { state.inv_hover_index = (int)*hover_index; state.inv_hover_time = 0.0f; }
+                } else {
+                    state.inv_hover_index = -1;
+                    state.inv_hover_time = 0.0f;
+                }
+                const float HOVER_DELAY = 0.12f;
+                // Drag-and-drop handling for inventory slots
+                static bool prev_left = false;
+                bool now_left = state.mouse_inputs.left;
+                if (now_left && !prev_left) {
+                    if (hover_index.has_value()) {
+                        if (state.inventory.get(*hover_index) != nullptr) {
+                            state.inv_dragging = true;
+                            state.inv_drag_src = (int)*hover_index;
+                        }
+                    }
+                }
+                if (!now_left && prev_left) {
+                    if (state.inv_dragging) {
+                        if (hover_index.has_value()) {
+                            std::size_t dst = *hover_index;
+                            std::size_t src = (std::size_t)std::max(0, state.inv_drag_src);
+                            if (dst != src) {
+                                InvEntry* src_e = state.inventory.get_mut(src);
+                                InvEntry* dst_e = state.inventory.get_mut(dst);
+                                if (src_e && dst_e) {
+                                    std::size_t tmp = src_e->index;
+                                    src_e->index = dst_e->index;
+                                    dst_e->index = tmp;
+                                } else if (src_e && !dst_e) {
+                                    src_e->index = dst;
+                                }
+                                std::sort(state.inventory.entries.begin(), state.inventory.entries.end(),
+                                          [](auto const& lhs, auto const& rhs) { return lhs.index < rhs.index; });
+                            }
+                        }
+                        state.inv_dragging = false;
+                        state.inv_drag_src = -1;
+                    }
+                }
+                prev_left = now_left;
+                if (hover_index.has_value() && state.inv_hover_time >= HOVER_DELAY) {
+                    const InvEntry* sel = state.inventory.get(*hover_index);
+                    if (sel) {
+                        int panel_w = (int)std::lround(width * 0.32);
+                        int px = (width - panel_w) / 2;
+                        int py = (int)std::lround(height * 0.22);
+                        SDL_Rect box{px, py, panel_w, 420};
+                        SDL_SetRenderDrawColor(renderer, 25, 25, 30, 220);
+                        SDL_RenderFillRect(renderer, &box);
+                        SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255);
+                        SDL_RenderDrawRect(renderer, &box);
+                        int tx = px + 12;
+                        int ty = py + 12;
+                        int lh = 18;
+                        auto draw_txt = [&](const std::string& s, SDL_Color col) {
+                            SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, s.c_str(), col);
+                            if (srf) {
+                                SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, srf);
+                                int tw = 0, th = 0;
+                                SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                                SDL_Rect d{tx, ty, tw, th};
+                                SDL_RenderCopy(renderer, t, nullptr, &d);
+                                SDL_DestroyTexture(t);
+                                SDL_FreeSurface(srf);
+                            }
+                            ty += lh;
+                        };
+                        // (no local helpers here)
+                        // (hover selected item panel keeps simple draw_txt; no kv helpers here to avoid unused warnings)
+                        if (sel->kind == INV_ITEM) {
+                            if (const ItemInstance* inst = state.items.get(sel->vid)) {
+                                std::string nm = "item";
+                                std::string desc;
+                                uint32_t maxc = 1;
+                                bool consume = false;
+                                int sid = -1;
+                                if (g_lua_mgr) {
+                                    for (auto const& d : g_lua_mgr->items())
+                                        if (d.type == inst->def_type) {
+                                            nm = d.name;
+                                            desc = d.desc;
+                                            maxc = (uint32_t)d.max_count;
+                                            consume = d.consume_on_use;
+                                            if (!d.sprite.empty() && d.sprite.find(':') != std::string::npos && g_sprite_ids)
+                                                sid = g_sprite_ids->try_get(d.sprite);
+                                            break;
+                                        }
+                                }
+                                if (sid >= 0) if (SDL_Texture* tex = textures.get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 36; }
+                                draw_txt(std::string("Item: ") + nm, SDL_Color{255, 255, 255, 255});
+                                draw_txt(std::string("Count: ") + std::to_string(inst->count) + "/" + std::to_string(maxc), SDL_Color{220, 220, 220, 255});
+                                if (!desc.empty()) draw_txt(std::string("Desc: ") + desc, SDL_Color{200, 200, 200, 255});
+                                draw_txt(std::string("Consumable: ") + (consume ? "Yes" : "No"), SDL_Color{220, 220, 220, 255});
+                            }
+                        } else if (sel->kind == INV_GUN) {
+                            if (const GunInstance* gi = state.guns.get(sel->vid)) {
+                                std::string nm = "gun";
+                                const GunDef* gdp = nullptr;
+                                if (g_lua_mgr) {
+                                    for (auto const& g : g_lua_mgr->guns()) if (g.type == gi->def_type) { gdp = &g; break; }
+                                }
+                                if (gdp) {
+                                    int gun_sid = -1;
+                                    if (!gdp->sprite.empty() && g_sprite_ids) gun_sid = g_sprite_ids->try_get(gdp->sprite);
+                                    if (gun_sid >= 0) if (SDL_Texture* tex = textures.get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; }
+                                    draw_txt(std::string("Gun: ") + gdp->name, SDL_Color{255, 255, 255, 255});
+                                    draw_txt(std::string("Damage: ") + std::to_string((int)std::lround(gdp->damage)), SDL_Color{220, 220, 220, 255});
+                                    draw_txt(std::string("RPM: ") + std::to_string((int)std::lround(gdp->rpm)), SDL_Color{220, 220, 220, 255});
+                                    // extra stats
+                                    draw_txt(std::string("Deviation: ") + std::to_string(gdp->deviation) + " deg", SDL_Color{220, 220, 220, 255});
+                                    draw_txt(std::string("Pellets: ") + std::to_string(gdp->pellets_per_shot), SDL_Color{220, 220, 220, 255});
+                                    draw_txt(std::string("Recoil: ") + std::to_string(gdp->recoil), SDL_Color{220, 220, 220, 255});
+                                    draw_txt(std::string("Control: ") + std::to_string(gdp->control), SDL_Color{220, 220, 220, 255});
+                                    draw_txt(std::string("Recoil cap: ") + std::to_string((int)std::lround(gdp->max_recoil_spread_deg)) + " deg", SDL_Color{220, 220, 220, 255});
+                                    draw_txt(std::string("Reload/Eject: ") + std::to_string((int)std::lround(gdp->reload_time * 1000.0f)) + "/" + std::to_string((int)std::lround(gdp->eject_time * 1000.0f)) + " ms", SDL_Color{220, 220, 220, 255});
+                                    draw_txt(std::string("Jam: ") + std::to_string((int)std::lround(gdp->jam_chance * 100.0f)) + " %", SDL_Color{220, 220, 220, 255});
+                                    // AR window details
+                                    draw_txt(std::string("AR Center: ") + std::to_string(gdp->ar_pos) +
+                                                 std::string(" ±") + std::to_string(gdp->ar_pos_variance), SDL_Color{220, 220, 220, 255});
+                                    draw_txt(std::string("AR Size: ") + std::to_string(gdp->ar_size) +
+                                                 std::string(" ±") + std::to_string(gdp->ar_size_variance), SDL_Color{220, 220, 220, 255});
+                                    // ammo for hovered gun if it has one (uses its instance)
+                                    if (gi->ammo_type != 0) {
+                                        if (auto const* ad = g_lua_mgr->find_ammo(gi->ammo_type)) {
+                                            int asid = (!ad->sprite.empty() && g_sprite_ids) ? g_sprite_ids->try_get(ad->sprite) : -1;
+                                            if (asid >= 0) if (SDL_Texture* tex = textures.get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
+                                            draw_txt(std::string("Ammo: ") + ad->name, SDL_Color{255, 255, 255, 255});
+                                            if (!ad->desc.empty()) draw_txt(std::string("Desc: ") + ad->desc, SDL_Color{200, 200, 200, 255});
+                                            int apct = (int)std::lround(ad->armor_pen * 100.0f);
+                                            draw_txt(std::string("Ammo Stats: DMG x") + std::to_string(ad->damage_mult) +
+                                                         std::string(", AP ") + std::to_string(apct) + "%" +
+                                                         std::string(", Shield x") + std::to_string(ad->shield_mult), SDL_Color{220, 220, 220, 255});
+                                            if (ad->range_units > 0.0f) {
+                                                draw_txt(std::string("Range: ") + std::to_string((int)std::lround(ad->range_units)) +
+                                                             std::string(" (falloff ") + std::to_string((int)std::lround(ad->falloff_start)) +
+                                                             std::string("→") + std::to_string((int)std::lround(ad->falloff_end)) +
+                                                             std::string(" @ x") + std::to_string(ad->falloff_min_mult) + ")", SDL_Color{220, 220, 220, 255});
+                                            }
+                                            draw_txt(std::string("Speed: ") + std::to_string((int)std::lround(ad->speed)) +
+                                                         std::string(", Pierce: ") + std::to_string(ad->pierce_count), SDL_Color{220, 220, 220, 255});
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
-            // Right-side selected item details panel (gameplay only)
-            if (ui_font && state.mode == ids::MODE_PLAYING) {
+            // Right-side selected item details panel removed in favor of hover center panel
+            if (false) {
                 const InvEntry* sel = state.inventory.selected_entry();
                 if (sel) {
                     int panel_w = (int)std::lround(width * 0.26);
@@ -3371,6 +3760,7 @@ init_ok:
                             std::string desc;
                             uint32_t maxc = 1;
                             bool consume = false;
+                            int sid = -1;
                             if (g_lua_mgr) {
                                 for (auto const& d : g_lua_mgr->items())
                                     if (d.type == inst->def_type) {
@@ -3378,8 +3768,18 @@ init_ok:
                                         desc = d.desc;
                                         maxc = (uint32_t)d.max_count;
                                         consume = d.consume_on_use;
+                                        if (!d.sprite.empty() && d.sprite.find(':') != std::string::npos && g_sprite_ids)
+                                            sid = g_sprite_ids->try_get(d.sprite);
                                         break;
                                     }
+                            }
+                            // Icon
+                            if (sid >= 0) {
+                                if (SDL_Texture* tex = textures.get(sid)) {
+                                    SDL_Rect dst{tx, ty, 32, 32};
+                                    SDL_RenderCopy(renderer, tex, nullptr, &dst);
+                                    ty += 34;
+                                }
                             }
                             draw_txt(std::string("Selected: ") + nm, SDL_Color{255, 255, 255, 255});
                             draw_txt(std::string("Count: ") + std::to_string(inst->count) + "/" +
@@ -3401,6 +3801,7 @@ init_ok:
                             float burst_rpm = 0.0f;
                             float shot_interval = 0.0f;
                             float burst_interval = 0.0f;
+                            int gun_sid = -1;
                             if (g_lua_mgr) {
                                 for (auto const& g : g_lua_mgr->guns())
                                     if (g.type == gi->def_type) {
@@ -3413,11 +3814,21 @@ init_ok:
                                         burst_rpm = g.burst_rpm;
                                         shot_interval = g.shot_interval;
                                         burst_interval = g.burst_interval;
+                                        if (!g.sprite.empty() && g.sprite.find(':') != std::string::npos && g_sprite_ids)
+                                            gun_sid = g_sprite_ids->try_get(g.sprite);
                                         break;
                                     }
                             }
                             mag = gi->current_mag;
                             ammo_res = gi->ammo_reserve;
+                            // Gun icon
+                            if (gun_sid >= 0) {
+                                if (SDL_Texture* tex = textures.get(gun_sid)) {
+                                    SDL_Rect dst{tx, ty, 48, 32};
+                                    SDL_RenderCopy(renderer, tex, nullptr, &dst);
+                                    ty += 34;
+                                }
+                            }
                             draw_txt(std::string("Selected: ") + nm, SDL_Color{255, 255, 255, 255});
                             draw_txt(std::string("DMG/RPM: ") + std::to_string((int)dmg) + "/" +
                                          std::to_string((int)rpm),
@@ -3456,13 +3867,73 @@ init_ok:
                                      SDL_Color{220, 220, 220, 255});
                             draw_txt(std::string("Reserve: ") + std::to_string(ammo_res),
                                      SDL_Color{220, 220, 220, 255});
+                            // Extra gun stats (selected)
+                            if (g_lua_mgr) {
+                                for (auto const& g : g_lua_mgr->guns())
+                                    if (g.type == gi->def_type) {
+                                        draw_txt(std::string("Deviation: ") + std::to_string(g.deviation) + " deg",
+                                                 SDL_Color{220, 220, 220, 255});
+                                        draw_txt(std::string("Pellets: ") + std::to_string(g.pellets_per_shot),
+                                                 SDL_Color{220, 220, 220, 255});
+                                        draw_txt(std::string("Recoil: ") + std::to_string(g.recoil),
+                                                 SDL_Color{220, 220, 220, 255});
+                                        draw_txt(std::string("Control: ") + std::to_string(g.control),
+                                                 SDL_Color{220, 220, 220, 255});
+                                        draw_txt(std::string("Recoil cap: ") + std::to_string((int)std::lround(g.max_recoil_spread_deg)) + " deg",
+                                                 SDL_Color{220, 220, 220, 255});
+                                        draw_txt(std::string("Reload/Eject: ") + std::to_string((int)std::lround(g.reload_time * 1000.0f)) +
+                                                     std::string("/") + std::to_string((int)std::lround(g.eject_time * 1000.0f)) + " ms",
+                                                 SDL_Color{220, 220, 220, 255});
+                                        draw_txt(std::string("Jam: ") + std::to_string((int)std::lround(g.jam_chance * 100.0f)) + " %",
+                                                 SDL_Color{220, 220, 220, 255});
+                                        break;
+                                    }
+                            }
+                            // Ammo details
+                            if (gi->ammo_type != 0 && g_lua_mgr) {
+                                if (auto const* ad = g_lua_mgr->find_ammo(gi->ammo_type)) {
+                                    // Ammo icon
+                                    if (!ad->sprite.empty() && g_sprite_ids) {
+                                        int asid = g_sprite_ids->try_get(ad->sprite);
+                                        if (asid >= 0) {
+                                            if (SDL_Texture* tex = textures.get(asid)) {
+                                                SDL_Rect dst{tx, ty, 32, 20};
+                                                SDL_RenderCopy(renderer, tex, nullptr, &dst);
+                                                ty += 22;
+                                            }
+                                        }
+                                    }
+                                    draw_txt(std::string("Ammo: ") + ad->name,
+                                             SDL_Color{255, 255, 255, 255});
+                                    if (!ad->desc.empty())
+                                        draw_txt(std::string("Desc: ") + ad->desc,
+                                                 SDL_Color{200, 200, 200, 255});
+                                    // Stats summary line(s)
+                                    int apct = (int)std::lround(ad->armor_pen * 100.0f);
+                                    draw_txt(std::string("Ammo Stats: DMG x") +
+                                                 std::to_string(ad->damage_mult) +
+                                                 std::string(", AP ") + std::to_string(apct) + "%" +
+                                                 std::string(", Shield x") + std::to_string(ad->shield_mult),
+                                             SDL_Color{220, 220, 220, 255});
+                                    if (ad->range_units > 0.0f) {
+                                        draw_txt(std::string("Range: ") + std::to_string((int)std::lround(ad->range_units)) +
+                                                     std::string(" (falloff ") + std::to_string((int)std::lround(ad->falloff_start)) +
+                                                     std::string("→") + std::to_string((int)std::lround(ad->falloff_end)) +
+                                                     std::string(" @ x") + std::to_string(ad->falloff_min_mult) + ")",
+                                                 SDL_Color{220, 220, 220, 255});
+                                    }
+                                    draw_txt(std::string("Speed: ") + std::to_string((int)std::lround(ad->speed)) +
+                                                 std::string(", Pierce: ") + std::to_string(ad->pierce_count),
+                                             SDL_Color{220, 220, 220, 255});
+                                }
+                            }
                         }
                     }
                 }
             }
 
             // Right-side gun panel (player's equipped) – gameplay only
-            if (ui_font && state.mode == ids::MODE_PLAYING && state.player_vid && g_lua_mgr) {
+            if (ui_font && state.mode == ids::MODE_PLAYING && state.player_vid && g_lua_mgr && state.show_gun_panel) {
                 const Entity* ply = state.entities.get(*state.player_vid);
                 if (ply && ply->equipped_gun_vid.has_value()) {
                     // lookup gun def by type
@@ -3478,8 +3949,8 @@ init_ok:
                     if (gd) {
                         int panel_w = (int)std::lround(width * 0.26);
                         int px = width - panel_w - 30;
-                        int py = (int)std::lround(height * 0.30);
-                        SDL_Rect box{px, py, panel_w, 220};
+                        int py = (int)std::lround(height * 0.18);
+                        SDL_Rect box{px, py, panel_w, 460};
                         SDL_SetRenderDrawColor(renderer, 25, 25, 30, 220);
                         SDL_RenderFillRect(renderer, &box);
                         SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255);
@@ -3500,12 +3971,41 @@ init_ok:
                             }
                             ty += lh;
                         };
-                        draw_txt(std::string("Gun: ") + gd->name, SDL_Color{255, 255, 255, 255});
-                        draw_txt(std::string("Damage: ") +
-                                     std::to_string((int)std::lround(gd->damage)),
-                                 SDL_Color{220, 220, 220, 255});
-                        draw_txt(std::string("RPM: ") + std::to_string((int)std::lround(gd->rpm)),
-                                 SDL_Color{220, 220, 220, 255});
+                        auto fmt2 = [](float v){ char buf[32]; std::snprintf(buf,sizeof(buf),"%.2f",(double)v); return std::string(buf); };
+                        auto draw_kv = [&](const char* key, const std::string& value){
+                            SDL_Color kc{150,150,150,255}; SDL_Color vc{230,230,230,255};
+                            int save_ty = ty; // key
+                            SDL_Surface* ks = TTF_RenderUTF8_Blended(ui_font, (std::string(key)+": ").c_str(), kc);
+                            int keyw=0,keyh=0; SDL_Texture* kt=nullptr; if (ks){ kt=SDL_CreateTextureFromSurface(renderer,ks); SDL_QueryTexture(kt,nullptr,nullptr,&keyw,&keyh); SDL_Rect kd{tx, save_ty, keyw, keyh}; SDL_RenderCopy(renderer, kt, nullptr, &kd); SDL_DestroyTexture(kt); SDL_FreeSurface(ks);} 
+                            // value
+                            SDL_Surface* vs = TTF_RenderUTF8_Blended(ui_font, value.c_str(), vc);
+                            if (vs){ SDL_Texture* vt=SDL_CreateTextureFromSurface(renderer,vs); int vw=0,vh=0; SDL_QueryTexture(vt,nullptr,nullptr,&vw,&vh); SDL_Rect vd{tx+keyw, save_ty, vw, vh}; SDL_RenderCopy(renderer, vt, nullptr, &vd); SDL_DestroyTexture(vt); SDL_FreeSurface(vs);} 
+                            ty += lh;
+                        };
+                        // Gun sprite icon
+                        if (!gd->sprite.empty() && g_sprite_ids) {
+                            int sid = g_sprite_ids->try_get(gd->sprite);
+                            if (sid >= 0) {
+                                if (SDL_Texture* tex = textures.get(sid)) {
+                                    SDL_Rect dst{tx, ty, 64, 40};
+                                    SDL_RenderCopy(renderer, tex, nullptr, &dst);
+                                    ty += 44;
+                                }
+                            }
+                        }
+                        draw_kv("Gun", gd->name);
+                        draw_kv("Damage", std::to_string((int)std::lround(gd->damage)));
+                        draw_kv("RPM", std::to_string((int)std::lround(gd->rpm)));
+                        // Extra gun stats
+                        draw_kv("Deviation", fmt2(gd->deviation) + " deg");
+                        draw_kv("Pellets", std::to_string(gd->pellets_per_shot));
+                        draw_kv("Recoil cap", std::to_string((int)std::lround(gd->max_recoil_spread_deg)) + " deg");
+                        draw_kv("Reload", std::to_string((int)std::lround(gd->reload_time * 1000.0f)) + " ms");
+                        draw_kv("Eject", std::to_string((int)std::lround(gd->eject_time * 1000.0f)) + " ms");
+                        draw_kv("Jam", std::to_string((int)std::lround(gd->jam_chance * 100.0f)) + " %");
+                        // AR window details
+                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AR Center", fmt2(gd->ar_pos) + " ±" + fmt2(gd->ar_pos_variance));
+                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AR Size", fmt2(gd->ar_size) + " ±" + fmt2(gd->ar_size_variance));
                         // Timings
                         if (gd->rpm > 0.0f || gd->shot_interval > 0.0f) {
                             float dt = gd->shot_interval > 0.0f ? gd->shot_interval : (60.0f / std::max(1.0f, gd->rpm));
@@ -3535,16 +4035,43 @@ init_ok:
                             }
                             draw_txt(std::string("Fire: ") + fm_label, SDL_Color{220, 220, 220, 255});
                         }
-                        draw_txt(std::string("Recoil: ") + std::to_string(gd->recoil),
-                                 SDL_Color{220, 220, 220, 255});
-                        draw_txt(std::string("Control: ") + std::to_string(gd->control),
-                                 SDL_Color{220, 220, 220, 255});
+                        draw_txt(std::string("Recoil: ") + fmt2(gd->recoil), SDL_Color{220,220,220,255});
+                        draw_txt(std::string("Control: ") + fmt2(gd->control), SDL_Color{220,220,220,255});
                         // Show instance ammo
                         if (gi_inst) {
-                            draw_txt(std::string("Mag: ") + std::to_string(gi_inst->current_mag) +
-                                         std::string(" / Reserve: ") +
-                                         std::to_string(gi_inst->ammo_reserve),
-                                     SDL_Color{220, 220, 220, 255});
+                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Mag", std::to_string(gi_inst->current_mag));
+                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Reserve", std::to_string(gi_inst->ammo_reserve));
+                            if (gi_inst->ammo_type != 0) {
+                                if (auto const* ad = g_lua_mgr->find_ammo(gi_inst->ammo_type)) {
+                                    // ammo sprite
+                                    if (!ad->sprite.empty() && g_sprite_ids) {
+                                        int asid = g_sprite_ids->try_get(ad->sprite);
+                                        if (asid >= 0) {
+                                            if (SDL_Texture* tex = textures.get(asid)) {
+                                                SDL_Rect dst{tx, ty, 36, 20};
+                                                SDL_RenderCopy(renderer, tex, nullptr, &dst);
+                                                ty += 22;
+                                            }
+                                        }
+                                    }
+                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Ammo", ad->name);
+                                    if (!ad->desc.empty()) ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Desc", ad->desc);
+                                    int apct = (int)std::lround(ad->armor_pen * 100.0f);
+                                    // indent ammo stats
+                                    int save_tx = tx; tx += 10;
+                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "DMG", fmt2(ad->damage_mult));
+                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AP", std::to_string(apct) + "%");
+                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Shield", fmt2(ad->shield_mult));
+                                    if (ad->range_units > 0.0f) {
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
+                                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
+                                    }
+                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
+                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
+                                    tx = save_tx;
+                                }
+                            }
                         }
                     }
                 }
@@ -3987,6 +4514,7 @@ static glm::ivec2 nearest_walkable_tile(const State& state, glm::ivec2 t, int ma
     return t;
 }
 
+                        // stray global insertion removed
 static glm::vec2 ensure_not_in_block(const State& state, glm::vec2 pos) {
     glm::ivec2 t{(int)std::floor(pos.x), (int)std::floor(pos.y)};
     glm::ivec2 w = nearest_walkable_tile(state, t, 16);

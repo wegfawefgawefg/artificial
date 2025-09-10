@@ -60,6 +60,11 @@ struct Entity {
 
         // Armor plates: each consumes one hit before applying damage
         int plates{0};
+
+        // Movement inaccuracy dynamics (deg/sec), per-entity type
+        float move_spread_inc_rate_deg_per_sec_at_base{8.0f}; // per 350u/s equivalent
+        float move_spread_decay_deg_per_sec{10.0f};
+        float move_spread_max_deg{20.0f};
     } stats{};
 
     // Equipment

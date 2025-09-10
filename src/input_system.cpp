@@ -96,11 +96,11 @@ void build_inputs(const InputBindings& bind, const InputContext& ctx, State& sta
     }
     prev_c = c_now;
 
-    // Toggle camera follow with 'V'
+    // Toggle gun info panel with 'V'
     static bool prev_v = false;
     bool v_now = is_down(SDL_SCANCODE_V);
     if (v_now && !prev_v) {
-        state.camera_follow_enabled = !state.camera_follow_enabled;
+        state.show_gun_panel = !state.show_gun_panel;
     }
     prev_v = v_now;
 }

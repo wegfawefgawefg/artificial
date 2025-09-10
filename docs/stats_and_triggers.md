@@ -70,8 +70,8 @@ Additional fields for reload/active reload:
 - on_drop(): optional callback when a gun is dropped to the ground
 - on_step(): optional callback. Only runs when opt-in ticking is enabled via `tick_rate_hz`.
 - on_failed_active_reload(): optional callback for failing the active window.
-- on_tried_to_active_reload_after_failing(): optional callback when pressing reload again after failing during the same reload.
-- on_eject(), on_reload_start(), on_reload_finish(): optional lifecycle callbacks.
+  - on_tried_to_active_reload_after_failing(): optional callback when pressing reload again after failing during the same reload.
+  - on_eject(), on_reload_start(), on_reload_finish(): optional lifecycle callbacks.
 
 Cadence fields (optional):
 - shot_interval (seconds): explicit time between normal shots. If omitted/0, UI derives from `rpm`.
@@ -85,7 +85,7 @@ Global hooks (Sol2):
 - register_on_tried_to_active_reload_after_failing(function), on_tried_to_active_reload_after_failing()
 - register_on_eject(function), on_eject()
 - register_on_reload_start(function), on_reload_start()
-- register_on_reload_finish(function), on_reload_finish()
+  - register_on_reload_finish(function), on_reload_finish()
 Ticking (opt-in):
 - tick_rate_hz (number): frequency for item/gun ticks. If 0 or omitted, no ticking occurs.
 - tick_phase ("before"|"after"): phase to call ticks relative to physics. Defaults to "after".
@@ -95,4 +95,27 @@ Ticking (opt-in):
 Scheduler guarantees:
 - Only hosts with ticking instances are iterated.
 - Per-frame tick call cap (e.g., 2–5k); excess spills to next frame via accumulator.
-- Encourage timers/phases/conditions instead of ticks.
+  - Encourage timers/phases/conditions instead of ticks.
+
+## Ammo (Lua)
+- Define shared ammo types once and reuse across guns. Ammo influences projectile visuals and damage behavior.
+
+`register_ammo{ ... }` fields:
+- name (string), type (int), desc (string)
+- sprite (string), size_x (number), size_y (number), speed (number)
+- damage_mult (number): scales the gun’s base damage
+- armor_pen (0..1): fraction of armor ignored (entity-only)
+- shield_mult (number): multiplier applied to shield damage
+- range (number): max travel distance in world units (0 = unlimited)
+- falloff_start (number), falloff_end (number): distance window for linear falloff
+- falloff_min_mult (number): damage multiplier at/after `falloff_end`
+- pierce_count (int): number of entities this projectile can pass through before stopping
+- on_hit(), on_hit_entity(), on_hit_tile(): optional hooks fired when ammo-bearing projectile hits
+
+Gun ↔ Ammo compatibility:
+- Guns may declare `compatible_ammo = { {type=300, weight=0.8}, ... }`.
+- A gun’s ammo is chosen on gun spawn via weighted selection; scripts can override.
+
+Runtime ammo swap (Lua API):
+- `api.set_equipped_ammo(type)`: sets if compatible with the gun; brief UI alert.
+- `api.set_equipped_ammo_force(type)`: sets regardless of compatibility; brief UI alert.

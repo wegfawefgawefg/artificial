@@ -45,3 +45,21 @@ Pages/Rooms (new)
 - Proceed conditions: SPACE or left click after delay.
 - Add State metrics counters: damage_dealt, shots_fired/hit, dashes_used, dmg_taken, dmg_shields, plates_gained/lost, time_in_stage, crates_opened, pickups.
 - Add Decoration data and renderer pass; y-sort with entities; texture lookup via sprite key.
+
+Mechanics: Accuracy
+- GunDef: add `deviation`, `recoil`, `control`, `pellets`, `max_recoil_spread_deg`.
+- Entity: add `move_spread_deg` accumulator; Stats include per-type movement spread inc/decay/max.
+- Reticle: r = dist * tan(theta); theta = base/acc + move/acc + recoil; clamp by per-entity min/max.
+- Firing: sample [-theta, +theta] per pellet.
+
+Entity Type Defs (planned)
+- Lua API: `register_entity_type{ id, name, stats={ accuracy, move_spread_inc_rate, move_spread_decay, move_spread_max, ... } }`
+- Assign: at spawn or default to player/NPCs; persist to save.
+- Optional runtime: `api.set_move_spread_params(inc, decay, max)` for quick tuning before full types land.
+
+Ammo Type Defs (planned)
+- Lua API: `register_ammo{ id, name, family, damage, armor_pen, speed, accel, lifespan, range, falloff={...}, ricochet={...}, shrapnel={...}, modifiers={...} }`
+- Gun compatibility: `compatible_ammo=[...]` list on guns; UI + selection; default mapping.
+- Integrations:
+  - On shot: resolve ammo, apply damage/AP/speed, ricochet/shrapnel logic, range/lifespan/falloff.
+  - Add helpers to express distance falloff curves (e.g., near/far multipliers or piecewise points).

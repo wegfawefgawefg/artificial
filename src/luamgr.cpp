@@ -56,6 +56,8 @@ void LuaManager::clear() {
     powerups_.clear();
     items_.clear();
     guns_.clear();
+    projectiles_.clear();
+    ammo_.clear();
 }
 
 bool LuaManager::init() {
@@ -248,6 +250,10 @@ static int l_register_gun(lua_State* L) {
     if (lua_isnumber(L, -1))
         d.control = (float)lua_tonumber(L, -1);
     lua_pop(L, 1);
+    lua_getfield(L, 1, "max_recoil_spread_deg");
+    if (lua_isnumber(L, -1))
+        d.max_recoil_spread_deg = (float)lua_tonumber(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, 1, "pellets");
     if (lua_isinteger(L, -1))
         d.pellets_per_shot = (int)lua_tointeger(L, -1);
@@ -338,6 +344,7 @@ bool LuaManager::register_api() {
         d.deviation = t.get_or("deviation", 0.0f);
         d.recoil = t.get_or("recoil", 0.0f);
         d.control = t.get_or("control", 0.0f);
+        d.max_recoil_spread_deg = t.get_or("max_recoil_spread_deg", 12.0f);
         d.pellets_per_shot = t.get_or("pellets", 1);
         d.mag = t.get_or("mag", 0);
         d.ammo_max = t.get_or("ammo_max", 0);
@@ -426,7 +433,50 @@ bool LuaManager::register_api() {
             f.push();
             d.on_step_ref = luaL_ref(L, LUA_REGISTRYINDEX);
         }
+        // Optional compatible_ammo list: { {type=..., weight=...}, ... }
+        sol::object ammo_list_obj = t.get<sol::object>("compatible_ammo");
+        if (ammo_list_obj.is<sol::table>()) {
+            sol::table arr = ammo_list_obj;
+            for (auto& kv : arr) {
+                sol::object v = kv.second;
+                if (v.is<sol::table>()) {
+                    sol::table e = v;
+                    AmmoCompat ac{};
+                    ac.type = e.get_or("type", 0);
+                    ac.weight = e.get_or("weight", 1.0f);
+                    if (ac.type != 0 && ac.weight > 0.0f)
+                        d.compatible_ammo.push_back(ac);
+                }
+            }
+        }
         add_gun(d);
+    });
+    // Register ammo types
+    s.set_function("register_ammo", [this](sol::table t) {
+        AmmoDef d{};
+        d.name = t.get_or("name", std::string{});
+        d.type = t.get_or("type", 0);
+        d.desc = t.get_or("desc", std::string{});
+        d.sprite = t.get_or("sprite", std::string{});
+        d.size_x = t.get_or("size_x", 0.2f);
+        d.size_y = t.get_or("size_y", 0.2f);
+        d.speed = t.get_or("speed", 20.0f);
+        d.damage_mult = t.get_or("damage_mult", 1.0f);
+        d.armor_pen = t.get_or("armor_pen", 0.0f);
+        d.shield_mult = t.get_or("shield_mult", 1.0f);
+        d.range_units = t.get_or("range", 0.0f);
+        d.falloff_start = t.get_or("falloff_start", 0.0f);
+        d.falloff_end = t.get_or("falloff_end", 0.0f);
+        d.falloff_min_mult = t.get_or("falloff_min_mult", 1.0f);
+        d.pierce_count = t.get_or("pierce_count", 0);
+        // Optional hooks
+        sol::object oh = t.get<sol::object>("on_hit");
+        if (oh.is<sol::function>()) { sol::function f = oh.as<sol::function>(); f.push(); d.on_hit_ref = luaL_ref(L, LUA_REGISTRYINDEX); }
+        sol::object ohe = t.get<sol::object>("on_hit_entity");
+        if (ohe.is<sol::function>()) { sol::function f = ohe.as<sol::function>(); f.push(); d.on_hit_entity_ref = luaL_ref(L, LUA_REGISTRYINDEX); }
+        sol::object oht = t.get<sol::object>("on_hit_tile");
+        if (oht.is<sol::function>()) { sol::function f = oht.as<sol::function>(); f.push(); d.on_hit_tile_ref = luaL_ref(L, LUA_REGISTRYINDEX); }
+        add_ammo(d);
     });
     s.set_function("register_projectile", [this](sol::table t) {
         ProjectileDef d{};
@@ -606,6 +656,52 @@ bool LuaManager::register_api() {
             return;
         gi->ammo_reserve = gd->ammo_max;
         gi->current_mag = gd->mag;
+    });
+    api.set_function("set_equipped_ammo", [](int ammo_type) {
+        if (!g_state_ctx || !g_player_ctx)
+            return;
+        if (!g_player_ctx->equipped_gun_vid.has_value())
+            return;
+        auto* gi = g_state_ctx->guns.get(*g_player_ctx->equipped_gun_vid);
+        if (!gi)
+            return;
+        // Enforce compatibility: only allow ammo listed on gun def
+        const GunDef* gd = nullptr;
+        if (g_mgr) {
+            for (auto const& g : g_mgr->guns())
+                if (g.type == gi->def_type) { gd = &g; break; }
+        }
+        if (!gd)
+            return;
+        bool ok = false;
+        for (auto const& ac : gd->compatible_ammo) {
+            if (ac.type == ammo_type) { ok = true; break; }
+        }
+        if (ok) {
+            gi->ammo_type = ammo_type;
+            // UX: alert with ammo name
+            if (g_mgr && g_state_ctx) {
+                if (auto const* ad = g_mgr->find_ammo(ammo_type))
+                    g_state_ctx->alerts.push_back({std::string("Ammo set: ") + ad->name, 0.0f, 1.2f, false});
+                else
+                    g_state_ctx->alerts.push_back({std::string("Ammo set: ") + std::to_string(ammo_type), 0.0f, 1.0f, false});
+            }
+        }
+    });
+    api.set_function("set_equipped_ammo_force", [](int ammo_type) {
+        if (!g_state_ctx || !g_player_ctx)
+            return;
+        if (!g_player_ctx->equipped_gun_vid.has_value())
+            return;
+        if (auto* gi = g_state_ctx->guns.get(*g_player_ctx->equipped_gun_vid)) {
+            gi->ammo_type = ammo_type;
+            if (g_mgr && g_state_ctx) {
+                if (auto const* ad = g_mgr->find_ammo(ammo_type))
+                    g_state_ctx->alerts.push_back({std::string("Ammo forced: ") + ad->name, 0.0f, 1.2f, false});
+                else
+                    g_state_ctx->alerts.push_back({std::string("Ammo forced: ") + std::to_string(ammo_type), 0.0f, 1.0f, false});
+            }
+        }
     });
     // World spawn helpers (require g_state_ctx)
     api.set_function("spawn_crate", [this](int type, float x, float y) {
@@ -826,6 +922,54 @@ void LuaManager::call_projectile_on_hit_tile(int proj_type) {
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
         const char* err = lua_tostring(L, -1);
         std::fprintf(stderr, "[lua] projectile on_hit_tile error: %s\n", err ? err : "(unknown)");
+        lua_pop(L, 1);
+    }
+#endif
+#endif
+}
+
+void LuaManager::call_ammo_on_hit(int ammo_type) {
+#ifdef GUB_ENABLE_LUA
+#ifdef GUB_USE_SOL2
+    const AmmoDef* ad = find_ammo(ammo_type);
+    if (!ad || ad->on_hit_ref < 0)
+        return;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ad->on_hit_ref);
+    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+        const char* err = lua_tostring(L, -1);
+        std::fprintf(stderr, "[lua] ammo on_hit error: %s\n", err ? err : "(unknown)");
+        lua_pop(L, 1);
+    }
+#endif
+#endif
+}
+
+void LuaManager::call_ammo_on_hit_entity(int ammo_type) {
+#ifdef GUB_ENABLE_LUA
+#ifdef GUB_USE_SOL2
+    const AmmoDef* ad = find_ammo(ammo_type);
+    if (!ad || ad->on_hit_entity_ref < 0)
+        return;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ad->on_hit_entity_ref);
+    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+        const char* err = lua_tostring(L, -1);
+        std::fprintf(stderr, "[lua] ammo on_hit_entity error: %s\n", err ? err : "(unknown)");
+        lua_pop(L, 1);
+    }
+#endif
+#endif
+}
+
+void LuaManager::call_ammo_on_hit_tile(int ammo_type) {
+#ifdef GUB_ENABLE_LUA
+#ifdef GUB_USE_SOL2
+    const AmmoDef* ad = find_ammo(ammo_type);
+    if (!ad || ad->on_hit_tile_ref < 0)
+        return;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, ad->on_hit_tile_ref);
+    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+        const char* err = lua_tostring(L, -1);
+        std::fprintf(stderr, "[lua] ammo on_hit_tile error: %s\n", err ? err : "(unknown)");
         lua_pop(L, 1);
     }
 #endif
@@ -1738,8 +1882,8 @@ bool LuaManager::load_mods(const std::string& mods_root) {
             }
         }
     }
-    std::printf("[lua] loaded: %zu powerups, %zu items, %zu guns\n", powerups_.size(),
-                items_.size(), guns_.size());
+    std::printf("[lua] loaded: %zu powerups, %zu items, %zu guns, %zu ammo, %zu projectiles\n",
+                powerups_.size(), items_.size(), guns_.size(), ammo_.size(), projectiles_.size());
     // Optional drop tables (sol2 only)
 #ifdef GUB_USE_SOL2
     drops_.powerups.clear();

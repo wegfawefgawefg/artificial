@@ -98,6 +98,15 @@ struct State {
     float hp_bar_shake{0.0f};
     float reload_bar_shake{0.0f};
 
+    // UI: inventory hover tracking for center info panel
+    int inv_hover_index{-1};
+    float inv_hover_time{0.0f};
+    // UI: inventory drag-and-drop state
+    bool inv_dragging{false};
+    int inv_drag_src{-1};
+    // UI: gun panel visibility toggle (V key)
+    bool show_gun_panel{true};
+
     // Character panel (left) and gun panel (right)
     bool show_character_panel{false};
     float character_panel_slide{0.0f}; // 0..1
