@@ -64,4 +64,6 @@ struct Entity {
 
     // Equipment
     std::optional<VID> equipped_gun_vid{};
+    // Accuracy: accumulated movement spread (deg), rises with movement, decays at rest
+    float move_spread_deg{0.0f};
 };

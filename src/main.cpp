@@ -425,6 +425,19 @@ init_ok:
                         }
                     }
                     prev_dash = now_dash;
+                    // Update movement spread accumulator (per-entity)
+                    {
+                        float spd = std::sqrt(e.vel.x * e.vel.x + e.vel.y * e.vel.y);
+                        // Normalize by baseline player speed in world units/sec
+                        float factor = std::clamp(spd / PLAYER_SPEED_UNITS_PER_SEC, 0.0f, 4.0f);
+                        if (factor > 0.01f) {
+                            e.move_spread_deg = std::min(MAX_SPREAD_DEG,
+                                e.move_spread_deg + MOVE_SPREAD_INCREASE_DEG_PER_SEC_AT_BASE_SPEED * factor * TIMESTEP);
+                        } else {
+                            e.move_spread_deg = std::max(0.0f,
+                                e.move_spread_deg - MOVE_SPREAD_DECAY_DEG_PER_SEC * TIMESTEP);
+                        }
+                    }
                     if (state.dash_timer > 0.0f) {
                         // Move in latched WASD direction
                         e.vel = state.dash_dir * DASH_SPEED_UNITS_PER_SEC;
@@ -583,7 +596,8 @@ init_ok:
                     float pt = p->pos.y - ph.y, pb = p->pos.y + ph.y;
                     static bool prev_pick = false;
                     bool now_pick = state.playing_inputs.pick_up;
-                    if (now_pick && !prev_pick) {
+                    if (now_pick && !prev_pick && state.pickup_lockout == 0.0f) {
+                        bool did_pick = false;
                         // Find single best overlap among guns/items by intersection area
                         enum class PickKind { None, Gun, Item };
                         PickKind best_kind = PickKind::None;
@@ -644,8 +658,9 @@ init_ok:
                                         }
                                 }
                             }
-                    if (ok) {
-                        gg.active = false;
+                            if (ok) {
+                                gg.active = false;
+                                did_pick = true;
                         state.alerts.push_back(
                             {std::string("Picked up ") + nm, 0.0f, 2.0f, false});
                         // Metrics
@@ -719,6 +734,7 @@ init_ok:
                                         state.items.free(gi.item_vid);
                                         gi.active = false;
                                         fully_merged = true;
+                                        did_pick = true;
                                         break;
                                     }
                                 }
@@ -727,6 +743,7 @@ init_ok:
                                 bool ok = state.inventory.insert_existing(INV_ITEM, gi.item_vid);
                                 if (ok) {
                                     gi.active = false;
+                                    did_pick = true;
                                     if (pick) { // sound on pickup
                                         const ItemDef* idf = nullptr;
                                         if (g_lua_mgr) {
@@ -756,7 +773,10 @@ init_ok:
                                 state.alerts.push_back(
                                     {std::string("Picked up ") + nm, 0.0f, 2.0f, false});
                         }
+                        if (did_pick)
+                            state.pickup_lockout = PICKUP_DEBOUNCE_SECONDS;
                     }
+                    prev_pick = now_pick;
                     // consumed above; no-op here
                     // Simple separation to avoid intersecting ground items
                     for (auto& giA : state.ground_items.data())
@@ -1035,6 +1055,71 @@ init_ok:
                                 }
                             }
                         }
+                    // Cross separation between ground items and ground guns
+                    for (auto& gi : state.ground_items.data())
+                        if (gi.active) {
+                            glm::vec2 ih = gi.size * 0.5f;
+                            for (auto& gg : state.ground_guns.data())
+                                if (gg.active) {
+                                    glm::vec2 gh = gg.size * 0.5f;
+                                    bool overlap = !((gi.pos.x + ih.x) <= (gg.pos.x - gh.x) ||
+                                                     (gi.pos.x - ih.x) >= (gg.pos.x + gh.x) ||
+                                                     (gi.pos.y + ih.y) <= (gg.pos.y - gh.y) ||
+                                                     (gi.pos.y - ih.y) >= (gg.pos.y + gh.y));
+                                    if (overlap) {
+                                        glm::vec2 d = gi.pos - gg.pos;
+                                        if (d.x == 0 && d.y == 0)
+                                            d = {0.01f, 0.0f};
+                                        float len = std::sqrt(d.x * d.x + d.y * d.y);
+                                        if (len < 1e-3f)
+                                            len = 1.0f;
+                                        d /= len;
+                                        gi.pos += d * 0.01f;
+                                        gg.pos -= d * 0.01f;
+                                    }
+                                }
+                        }
+                    // Push ground items and guns away from crates (chests)
+                    for (auto& c : state.crates.data())
+                        if (c.active) {
+                            glm::vec2 ch = c.size * 0.5f;
+                            for (auto& gi : state.ground_items.data())
+                                if (gi.active) {
+                                    glm::vec2 ih = gi.size * 0.5f;
+                                    bool overlap = !((gi.pos.x + ih.x) <= (c.pos.x - ch.x) ||
+                                                     (gi.pos.x - ih.x) >= (c.pos.x + ch.x) ||
+                                                     (gi.pos.y + ih.y) <= (c.pos.y - ch.y) ||
+                                                     (gi.pos.y - ih.y) >= (c.pos.y + ch.y));
+                                    if (overlap) {
+                                        glm::vec2 d = gi.pos - c.pos;
+                                        if (d.x == 0 && d.y == 0)
+                                            d = {0.01f, 0.0f};
+                                        float len = std::sqrt(d.x * d.x + d.y * d.y);
+                                        if (len < 1e-3f)
+                                            len = 1.0f;
+                                        d /= len;
+                                        gi.pos += d * 0.02f;
+                                    }
+                                }
+                            for (auto& gg : state.ground_guns.data())
+                                if (gg.active) {
+                                    glm::vec2 gh = gg.size * 0.5f;
+                                    bool overlap = !((gg.pos.x + gh.x) <= (c.pos.x - ch.x) ||
+                                                     (gg.pos.x - gh.x) >= (c.pos.x + ch.x) ||
+                                                     (gg.pos.y + gh.y) <= (c.pos.y - ch.y) ||
+                                                     (gg.pos.y - gh.y) >= (c.pos.y + ch.y));
+                                    if (overlap) {
+                                        glm::vec2 d = gg.pos - c.pos;
+                                        if (d.x == 0 && d.y == 0)
+                                            d = {0.01f, 0.0f};
+                                        float len = std::sqrt(d.x * d.x + d.y * d.y);
+                                        if (len < 1e-3f)
+                                            len = 1.0f;
+                                        d /= len;
+                                        gg.pos += d * 0.02f;
+                                    }
+                                }
+                        }
                     }
                     prev[i] = nums[i];
                 }
@@ -1046,6 +1131,7 @@ init_ok:
             }
             // Decrement input lockout (prevents accidental actions after pages)
             state.input_lockout_timer = std::max(0.0f, state.input_lockout_timer - TIMESTEP);
+            state.pickup_lockout = std::max(0.0f, state.pickup_lockout - TIMESTEP);
 
             // Exit countdown and mode transitions
             if (state.mode == ids::MODE_PLAYING) {
@@ -1406,6 +1492,10 @@ init_ok:
                     GunInstance* gimq = state.guns.get(*plm->equipped_gun_vid);
                     if (gimq) {
                         gimq->burst_timer = std::max(0.0f, gimq->burst_timer - TIMESTEP);
+                        // Recoil spread decay (control = deg/sec)
+                        if (gdq) {
+                            gimq->spread_recoil_deg = std::max(0.0f, gimq->spread_recoil_deg - gdq->control * TIMESTEP);
+                        }
                         if (fire_mode == "auto")
                             fire_request = trig_held;
                         else if (fire_mode == "single")
@@ -1441,7 +1531,8 @@ init_ok:
                                gfx.play_cam.pos.y + (static_cast<float>(state.mouse_inputs.pos.y) -
                                                      static_cast<float>(wh) * 0.5f) *
                                                         inv_scale};
-                glm::vec2 dir = glm::normalize(m - p);
+                glm::vec2 aim = glm::normalize(m - p);
+                glm::vec2 dir = aim;
                 if (glm::any(glm::isnan(dir)))
                     dir = {1.0f, 0.0f};
                 // If gun equipped, respect ammo and rpm
@@ -1489,6 +1580,21 @@ init_ok:
                             } else {
                                 fired = false;
                             }
+                            // Apply accuracy perturbation to direction
+                            if (fired) {
+                                float acc = std::max(0.1f, state.entities.get(*state.player_vid)->stats.accuracy / 100.0f);
+                                float base_dev = (gd ? gd->deviation : 0.0f) / acc;
+                                float move_spread = state.entities.get(*state.player_vid)->move_spread_deg / acc;
+                                float recoil_spread = gim->spread_recoil_deg;
+                                float theta_deg = std::clamp(base_dev + move_spread + recoil_spread, MIN_SPREAD_DEG, MAX_SPREAD_DEG);
+                                // uniform random in [-theta, +theta]
+                                static thread_local std::mt19937 rng_theta{std::random_device{}()};
+                                std::uniform_real_distribution<float> Uphi(-theta_deg, theta_deg);
+                                float phi = Uphi(rng_theta) * 3.14159265358979323846f / 180.0f;
+                                float cs = std::cos(phi), sn = std::sin(phi);
+                                glm::vec2 rdir{aim.x * cs - aim.y * sn, aim.x * sn + aim.y * cs};
+                                dir = glm::normalize(rdir);
+                            }
                             // jam chance
                             if (fired) {
                                 static thread_local std::mt19937 rng{std::random_device{}()};
@@ -1517,19 +1623,66 @@ init_ok:
                                 if (auto* pm = state.metrics_for(*state.player_vid))
                                     pm->shots_fired += 1;
                             }
+                            // Accumulate recoil spread on shot
+                            if (fired && gd && gim)
+                                gim->spread_recoil_deg += gd->recoil;
                         }
                     }
                 }
                 if (fired) {
-                    // spawn at gun muzzle and tag owner to avoid self-collision
-                    glm::vec2 sp = p + dir * GUN_MUZZLE_OFFSET_UNITS;
-                    auto* pr =
-                        projectiles.spawn(sp, dir * proj_speed, proj_size, proj_steps, proj_type);
-                    if (pr && state.player_vid)
-                        pr->owner = state.player_vid;
-                    if (pr)
-                        pr->sprite_id = proj_sprite_id;
-                    (void)pr;
+                    // spawn pellets at gun muzzle, tag owner
+                    int pellets = 1;
+                    if (state.player_vid) {
+                        auto* plm = state.entities.get_mut(*state.player_vid);
+                        if (plm && plm->equipped_gun_vid.has_value()) {
+                            if (const GunInstance* gi = state.guns.get(*plm->equipped_gun_vid)) {
+                                const GunDef* gd = nullptr;
+                                if (g_lua_mgr) {
+                                    for (auto const& g : g_lua_mgr->guns())
+                                        if (g.type == gi->def_type) { gd = &g; break; }
+                                }
+                                if (gd && gd->pellets_per_shot > 1)
+                                    pellets = gd->pellets_per_shot;
+                            }
+                        }
+                    }
+                    // Compute spread angle once per shot
+                    float theta_deg_for_shot = 0.0f;
+                    if (state.player_vid) {
+                        auto* plm = state.entities.get_mut(*state.player_vid);
+                        if (plm && plm->equipped_gun_vid.has_value()) {
+                            if (const GunInstance* gi = state.guns.get(*plm->equipped_gun_vid)) {
+                                const GunDef* gd = nullptr;
+                                if (g_lua_mgr) {
+                                    for (auto const& g : g_lua_mgr->guns())
+                                        if (g.type == gi->def_type) { gd = &g; break; }
+                                }
+                                if (gd) {
+                                    float acc = std::max(0.1f, plm->stats.accuracy / 100.0f);
+                                    float base_dev = gd->deviation / acc;
+                                    float move_spread = plm->move_spread_deg / acc;
+                                    float recoil_spread = const_cast<GunInstance*>(gi)->spread_recoil_deg;
+                                    theta_deg_for_shot = std::clamp(base_dev + move_spread + recoil_spread,
+                                                                    MIN_SPREAD_DEG, MAX_SPREAD_DEG);
+                                }
+                            }
+                        }
+                    }
+                    static thread_local std::mt19937 rng_theta2{std::random_device{}()};
+                    std::uniform_real_distribution<float> Uphi2(-theta_deg_for_shot, theta_deg_for_shot);
+                    for (int i = 0; i < pellets; ++i) {
+                        float phi = Uphi2(rng_theta2) * 3.14159265358979323846f / 180.0f;
+                        float cs = std::cos(phi), sn = std::sin(phi);
+                        glm::vec2 pdir{aim.x * cs - aim.y * sn, aim.x * sn + aim.y * cs};
+                        pdir = glm::normalize(pdir);
+                        glm::vec2 sp = p + pdir * GUN_MUZZLE_OFFSET_UNITS;
+                        auto* pr = projectiles.spawn(sp, pdir * proj_speed, proj_size, proj_steps, proj_type);
+                        if (pr && state.player_vid)
+                            pr->owner = state.player_vid;
+                        if (pr)
+                            pr->sprite_id = proj_sprite_id;
+                        (void)pr;
+                    }
                     // play fire sound (gun-specific or fallback)
                     if (state.player_vid) {
                         auto* plm = state.entities.get_mut(*state.player_vid);
@@ -2618,7 +2771,46 @@ init_ok:
                 SDL_RenderDrawLine(renderer, mx - cross, my, mx + cross, my);
                 SDL_RenderDrawLine(renderer, mx, my - cross, mx, my + cross);
                 // circle approximation
-                int radius = 12;
+                // Compute accuracy-based reticle radius to match angular deviation
+                float reticle_radius_px = 12.0f;
+                // If player has gun, compute angular spread
+                if (state.player_vid) {
+                    const Entity* plv = state.entities.get(*state.player_vid);
+                    if (plv && plv->equipped_gun_vid.has_value() && g_lua_mgr) {
+                        const GunInstance* gi = state.guns.get(*plv->equipped_gun_vid);
+                        const GunDef* gd = nullptr;
+                        if (gi) {
+                            for (auto const& g : g_lua_mgr->guns())
+                                if (g.type == gi->def_type) { gd = &g; break; }
+                        }
+                        if (gd) {
+                            // Effective base deviation scaled by player accuracy
+                            float acc = std::max(0.1f, plv->stats.accuracy / 100.0f);
+                            float base_dev = gd->deviation / acc;
+                            // Movement spread from per-entity accumulator
+                            float move_spread = plv->move_spread_deg / acc;
+                            float recoil_spread = gi->spread_recoil_deg;
+                            float theta_deg = std::clamp(base_dev + move_spread + recoil_spread,
+                                                         MIN_SPREAD_DEG, MAX_SPREAD_DEG);
+                            // Convert to positional radius at current cursor distance
+                            // Compute player->mouse world distance
+                            int ww = width, wh = height;
+                            SDL_GetRendererOutputSize(renderer, &ww, &wh);
+                            float inv_scale = 1.0f / (TILE_SIZE * gfx.play_cam.zoom);
+                            // World positions
+                            glm::vec2 ppos = plv->pos;
+                            glm::vec2 mpos = {gfx.play_cam.pos.x + (static_cast<float>(state.mouse_inputs.pos.x) -
+                                                         static_cast<float>(ww) * 0.5f) * inv_scale,
+                                              gfx.play_cam.pos.y + (static_cast<float>(state.mouse_inputs.pos.y) -
+                                                         static_cast<float>(wh) * 0.5f) * inv_scale};
+                            float dist = std::sqrt((mpos.x - ppos.x)*(mpos.x - ppos.x) + (mpos.y - ppos.y)*(mpos.y - ppos.y));
+                            float theta_rad = theta_deg * 3.14159265358979323846f / 180.0f;
+                            float r_world = dist * std::tan(theta_rad);
+                            reticle_radius_px = std::max(6.0f, r_world * TILE_SIZE * gfx.play_cam.zoom);
+                        }
+                    }
+                }
+                int radius = (int)std::lround(reticle_radius_px);
                 const int segments = 32;
                 float prevx = static_cast<float>(mx) + static_cast<float>(radius);
                 float prevy = (float)my;
@@ -3743,6 +3935,31 @@ static void generate_room(State& state, Projectiles& projectiles, SDL_Renderer* 
             }
             if (gv)
                 state.ground_guns.spawn(*gv, place({0.0f, 2.0f}), sid);
+        }
+        // TEMP: spawn player with three shotguns for testing
+        if (g_lua_mgr && state.player_vid) {
+            Entity* p = state.entities.get_mut(*state.player_vid);
+            auto add_gun_to_inv = [&](int gun_type) {
+                for (auto const& g : g_lua_mgr->guns()) {
+                    if (g.type == gun_type) {
+                        if (auto gv = state.guns.spawn_from_def(g)) {
+                            state.inventory.insert_existing(INV_GUN, *gv);
+                            return *gv;
+                        }
+                    }
+                }
+                return VID{};
+            };
+            VID v1{}, v2{}, v3{};
+            v1 = add_gun_to_inv(210);
+            v2 = add_gun_to_inv(211);
+            v3 = add_gun_to_inv(212);
+            if (v1.id || v2.id || v3.id) {
+                // Equip the pump if available
+                if (v1.id) p->equipped_gun_vid = v1;
+                else if (v2.id) p->equipped_gun_vid = v2;
+                else if (v3.id) p->equipped_gun_vid = v3;
+            }
         }
         // Let Lua generate room content (crates, loot, etc.) if function is present
         if (g_lua_mgr)

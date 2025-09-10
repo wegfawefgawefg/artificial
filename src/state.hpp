@@ -103,6 +103,7 @@ struct State {
     float character_panel_slide{0.0f}; // 0..1
     // Short input suppression window (e.g., after page transitions) to avoid accidental fire
     float input_lockout_timer{0.0f};
+    float pickup_lockout{0.0f};
 
     // Metrics (per-stage). Designed for multi-player: per-player metrics keyed by entity slots.
     struct PlayerMetrics {

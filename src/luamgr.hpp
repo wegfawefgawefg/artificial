@@ -47,8 +47,10 @@ struct GunDef {
     int type = 0;
     float damage = 0.0f;
     float rpm = 0.0f;
+    float deviation = 0.0f; // base angular deviation (degrees)
     float recoil = 0.0f;
     float control = 0.0f;
+    int pellets_per_shot{1};
     int mag = 0;
     int ammo_max = 0;
     std::string sprite;

@@ -29,6 +29,28 @@ register_gun{ name = "Burst Rifle", type = 202, damage = 15, rpm = 600, recoil =
   fire_mode="burst", burst_count=5, burst_rpm=1100, shot_interval=0.10, burst_interval=0.0545,
   sound_fire="base:medium_shoot", sound_reload="base:reload", sound_jam="base:ui_cant", sound_pickup="base:drop" }
 
+-- Very inaccurate shotgun-esque test (uses burst to simulate pellets quickly)
+register_gun{ name = "Shotgun", type = 203, damage = 6, rpm = 80, recoil = 2.0, control = 6.0, deviation = 8.0,
+  mag = 6, ammo_max = 48, sprite="base:rifle", jam_chance=0.003, projectile_type=1,
+  fire_mode="single", pellets=8,
+  sound_fire="base:medium_shoot", sound_reload="base:reload", sound_jam="base:ui_cant", sound_pickup="base:drop" }
+
+-- Pump-2 (two-shot), Semi-auto, and Full-auto shotguns
+register_gun{ name = "Pump-2", type = 210, damage = 7, rpm = 55, recoil = 4.0, control = 7.0, deviation = 7.5,
+  mag = 2, ammo_max = 40, sprite="base:rifle", jam_chance=0.004, projectile_type=1,
+  fire_mode="single", pellets=8,
+  sound_fire="base:medium_shoot", sound_reload="base:reload" }
+
+register_gun{ name = "Semi-Auto SG", type = 211, damage = 6, rpm = 140, recoil = 3.0, control = 6.0, deviation = 7.0,
+  mag = 5, ammo_max = 50, sprite="base:rifle", jam_chance=0.004, projectile_type=1,
+  fire_mode="single", pellets=8,
+  sound_fire="base:medium_shoot", sound_reload="base:reload" }
+
+register_gun{ name = "Full-Auto SG", type = 212, damage = 5, rpm = 300, recoil = 2.2, control = 5.5, deviation = 8.5,
+  mag = 20, ammo_max = 120, sprite="base:rifle", jam_chance=0.004, projectile_type=1,
+  fire_mode="auto", pellets=6,
+  sound_fire="base:medium_shoot", sound_reload="base:reload" }
+
 -- Optional drop tables
 drops = {
   powerups = {
@@ -44,6 +66,10 @@ drops = {
     { type = 200, weight = 1.0 },
     { type = 201, weight = 0.7 },
     { type = 202, weight = 0.6 },
+    { type = 203, weight = 0.5 },
+    { type = 210, weight = 0.4 },
+    { type = 211, weight = 0.3 },
+    { type = 212, weight = 0.2 },
   }
 }
 

@@ -17,6 +17,8 @@ struct GunInstance {
     float unjam_progress{0.0f}; // 0..1 when mashing space
     int burst_remaining{0};
   float burst_timer{0.0f};
+  // Accuracy: accumulated recoil spread (degrees)
+  float spread_recoil_deg{0.0f};
   // Active reload state
   bool reloading{false};
   float reload_progress{0.0f}; // 0..1 after eject

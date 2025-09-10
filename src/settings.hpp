@@ -17,3 +17,12 @@ inline constexpr float GUN_HOLD_OFFSET_UNITS = 0.30f;
 inline constexpr float GUN_MUZZLE_OFFSET_UNITS = 0.40f; // where bullets spawn (reduced)
 inline constexpr float EXIT_COUNTDOWN_SECONDS = 5.0f;
 inline constexpr float SCORE_REVIEW_INPUT_DELAY = 0.8f;
+// Pickup tuning
+inline constexpr float PICKUP_DEBOUNCE_SECONDS = 0.20f; // minimum time between manual pickups
+// Accuracy tuning
+inline constexpr float MOVE_SPREAD_DEG_AT_BASE_SPEED = 2.0f; // deg at 350 units/s
+inline constexpr float MIN_SPREAD_DEG = 0.1f;
+inline constexpr float MAX_SPREAD_DEG = 20.0f;
+// Movement spread dynamics (deg/sec)
+inline constexpr float MOVE_SPREAD_INCREASE_DEG_PER_SEC_AT_BASE_SPEED = 8.0f; // per 350 u/s
+inline constexpr float MOVE_SPREAD_DECAY_DEG_PER_SEC = 10.0f;                  // when stationary

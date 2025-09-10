@@ -73,9 +73,15 @@ Implementation Plan
 5) Stack/duration ticking each frame; clean up expired
 6) Integrate into stacking rules: items only merge if identical modifier signature
 
+Movement Inaccuracy (planned hook)
+----------------------------------
+- Expose a modifier that affects movement spread dynamics:
+  - Fields: move_spread_inc_mult, move_spread_decay_mult, move_spread_flat_add
+  - Applied at player scope to adjust how quickly movement inaccuracy accumulates/decays.
+  - Good for perks, items, or temporary buffs/debuffs.
+
 Notes
 -----
 - Deterministic order: sort modifiers by a stable key (id) before application to ensure reproducibility.
 - Performance: cache the last computed EffectiveGunParams until inputs change.
 - Save/load: modifier lists must be serializable.
-

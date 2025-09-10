@@ -236,6 +236,10 @@ static int l_register_gun(lua_State* L) {
     if (lua_isnumber(L, -1))
         d.rpm = (float)lua_tonumber(L, -1);
     lua_pop(L, 1);
+    lua_getfield(L, 1, "deviation");
+    if (lua_isnumber(L, -1))
+        d.deviation = (float)lua_tonumber(L, -1);
+    lua_pop(L, 1);
     lua_getfield(L, 1, "recoil");
     if (lua_isnumber(L, -1))
         d.recoil = (float)lua_tonumber(L, -1);
@@ -243,6 +247,10 @@ static int l_register_gun(lua_State* L) {
     lua_getfield(L, 1, "control");
     if (lua_isnumber(L, -1))
         d.control = (float)lua_tonumber(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, 1, "pellets");
+    if (lua_isinteger(L, -1))
+        d.pellets_per_shot = (int)lua_tointeger(L, -1);
     lua_pop(L, 1);
     lua_getfield(L, 1, "mag");
     if (lua_isinteger(L, -1))
@@ -327,8 +335,10 @@ bool LuaManager::register_api() {
         d.type = t.get_or("type", 0);
         d.damage = t.get_or("damage", 0.0f);
         d.rpm = t.get_or("rpm", 0.0f);
+        d.deviation = t.get_or("deviation", 0.0f);
         d.recoil = t.get_or("recoil", 0.0f);
         d.control = t.get_or("control", 0.0f);
+        d.pellets_per_shot = t.get_or("pellets", 1);
         d.mag = t.get_or("mag", 0);
         d.ammo_max = t.get_or("ammo_max", 0);
         d.sprite = t.get_or("sprite", std::string{});
