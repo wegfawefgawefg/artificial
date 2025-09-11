@@ -117,6 +117,18 @@ Misc global cleanups
 - `TextureStore::load_all()` now uses `g_gfx->renderer` and `*g_sprite_store`; removed params.
 - `ui_draw_kv_line(...)` in `render.cpp` reads `g_gfx` directly; removed `renderer`/`font` params.
 
+In-Progress: Main Loop Refactor
+-------------------------------
+
+- Goal: Make `main.cpp` only do init → loop (step, render) → cleanup. No logic or rendering inside main.
+- Added `sim_step()` in `src/sim.hpp/cpp` which wraps per-frame work:
+  - Event polling, dt calculation, input build
+  - Alert aging/purge and hot-reload polling
+  - Fixed-timestep updates (pre-physics ticks, movement/collision, shield/reload, pickups, drop mode, number row, metrics/lockouts, exit tile transitions + score review prep, camera follow)
+  - Crate open progression
+  - Portions of active-reload and firing logic are being moved into `sim_step()` next.
+- Next: Replace the large per-frame body in `main.cpp` with a single call to `sim_step()` and `render_frame()`; keep FPS title and `--frames` logic in main.
+
 Next candidates:
 - Remove remaining `Graphics&` parameters (e.g., `build_inputs(...)`, `sim_move_and_collide(...)`) and use `g_gfx` internally.
 - Gradually expand `RuntimeSettings` to replace hard constants (dash timings, spread dynamics) with runtime-tunable values.

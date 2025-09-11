@@ -30,3 +30,7 @@ void sim_step_projectiles();
 
 // Manual pickup handling (F key) for best-overlap ground item/gun with sounds and metrics.
 void sim_handle_pickups();
+
+// One full frame of input + simulation (fixed-step updates inside).
+// Computes dt internally, polls events, builds inputs, runs updates.
+void sim_step();
