@@ -69,58 +69,22 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    const char* env_display = std::getenv("DISPLAY");
-    const char* env_wayland = std::getenv("WAYLAND_DISPLAY");
-    const char* env_sdl_driver = std::getenv("SDL_VIDEODRIVER");
-
-    if (arg_headless)
-        env_sdl_driver = "dummy";
-
-    if (!try_init_video_with_driver(env_sdl_driver)) {
-        if (env_display && *env_display) {
-            if (try_init_video_with_driver("x11"))
-                goto init_ok;
-        }
-        if (env_wayland && *env_wayland) {
-            if (try_init_video_with_driver("wayland"))
-                goto init_ok;
-        }
-        // Last resort: dummy driver for headless environments
-        if (try_init_video_with_driver("dummy")) {
-            std::fprintf(stderr, "Using SDL dummy video driver; no window will be shown.\n");
-        } else {
-            return 1;
-        }
-    }
-init_ok:
-
     const char* title = "gub";
     int width = 1280;
     int height = 720;
 
-    const char* active_driver = SDL_GetCurrentVideoDriver();
-    std::printf("SDL video driver: %s\n", active_driver ? active_driver : "(none)");
-
-    Uint32 win_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_UTILITY;
-    SDL_Window* window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                          width, height, win_flags);
-    if (!window) {
-        const char* err = SDL_GetError();
-        std::fprintf(stderr, "SDL_CreateWindow failed: %s\n",
-                     (err && *err) ? err : "(no error text)");
+    // Initialize Graphics and expose it globally (handles SDL video init too)
+    Graphics gfx{};
+    g_gfx = &gfx;
+    if (!init_graphics(gfx, arg_headless, title, width, height)) {
         SDL_Quit();
         return 1;
     }
+    SDL_Window* window = gfx.window;
+    SDL_Renderer* renderer = gfx.renderer;
 
-    // Ensure always-on-top in case WM didn't honor the flag immediately
-    SDL_SetWindowAlwaysOnTop(window, SDL_TRUE);
-
-    // Create a renderer so we can paint a background instead of showing desktop
-    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    if (!renderer) {
-        std::fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
-        renderer = SDL_CreateRenderer(window, -1, 0); // software fallback
-    }
+    const char* active_driver = SDL_GetCurrentVideoDriver();
+    std::printf("SDL video driver: %s\n", active_driver ? active_driver : "(none)");
 
     // quick GLM sanity check
     glm::vec3 a(1.0f, 2.0f, 3.0f);
@@ -130,7 +94,6 @@ init_ok:
 
     // Engine state/graphics
     State state{};
-    Graphics gfx{};
     state.mode = ids::MODE_PLAYING;
 
     // Text rendering setup (SDL_ttf)
@@ -187,6 +150,7 @@ init_ok:
     g_sprite_ids = &sprites;
     // Load textures for sprites
     TextureStore textures;
+    if (!arg_headless && renderer)
     textures.load_all(renderer, sprite_store);
     // Load sounds from mods/*/sounds/*.wav|*.ogg with key "mod:stem"
     {
@@ -493,7 +457,7 @@ init_ok:
                 const Entity* p = state.entities.get(*state.player_vid);
                 if (p) {
                     int ww = width, wh = height;
-                    SDL_GetRendererOutputSize(renderer, &ww, &wh);
+                    if (renderer) SDL_GetRendererOutputSize(renderer, &ww, &wh);
                     float zx = gfx.play_cam.zoom;
                     float sx = static_cast<float>(state.mouse_inputs.pos.x);
                     float sy = static_cast<float>(state.mouse_inputs.pos.y);
@@ -739,7 +703,7 @@ init_ok:
                                                            (float)state.stage.get_height() / 2.0f};
                 // convert mouse to world
                 int ww = width, wh = height;
-                SDL_GetRendererOutputSize(renderer, &ww, &wh);
+                if (renderer) SDL_GetRendererOutputSize(renderer, &ww, &wh);
                 float inv_scale = 1.0f / (TILE_SIZE * gfx.play_cam.zoom);
                 glm::vec2 m = {gfx.play_cam.pos.x + (static_cast<float>(state.mouse_inputs.pos.x) -
                                                      static_cast<float>(ww) * 0.5f) *
@@ -1084,243 +1048,7 @@ init_ok:
 
             // step projectiles with on-hit applying damage and drops
             sim_step_projectiles(state, projectiles);
-            // After projectile resolution
-            /* for (auto h : hits) {
-                auto id = h.eid;
-                if (id >= state.entities.data().size())
-                    continue;
-                auto& e = state.entities.data()[id];
-                if (!e.active)
-                    continue;
-                if (e.type_ == ids::ET_NPC || e.type_ == ids::ET_PLAYER) {
-                    if (e.health == 0)
-                        e.health = 3; // initialize default
-                    if (e.max_hp == 0)
-                        e.max_hp = 3;
-                    // Apply damage with shields, plates, armor using projectile/ammo parameters
-                    float dmg = h.base_damage;
-                    float ap = std::clamp(h.armor_pen * 100.0f, 0.0f, 100.0f);
-                    float shield_mult = h.shield_mult;
-                    // Apply distance falloff from ammo if defined
-                    if (g_lua_mgr && h.ammo_type != 0) {
-                        if (auto const* ad = g_lua_mgr->find_ammo(h.ammo_type)) {
-                            if (ad->falloff_end > ad->falloff_start && ad->falloff_end > 0.0f) {
-                                float m = 1.0f;
-                                if (h.travel_dist <= ad->falloff_start) m = 1.0f;
-                                else if (h.travel_dist >= ad->falloff_end) m = ad->falloff_min_mult;
-                                else {
-                                    float t = (h.travel_dist - ad->falloff_start) / (ad->falloff_end - ad->falloff_start);
-                                    m = 1.0f + t * (ad->falloff_min_mult - 1.0f);
-                                }
-                                if (m < 0.0f) m = 0.0f;
-                                dmg *= m;
-                            }
-                        }
-                    }
-                    // Fallback damage if none resolved
-                    if (dmg <= 0.0f)
-                        dmg = 1.0f;
-                    if (e.type_ == ids::ET_PLAYER) {
-                        // For players: shields first, then plates, then HP with armor
-                        if (e.stats.shield_max > 0.0f && e.shield > 0.0f) {
-                            float took = std::min(e.shield, (float)(dmg * shield_mult));
-                            e.shield -= took;
-                            // metrics: damage to shield
-                            if (auto* pm = state.metrics_for(e.vid))
-                                pm->damage_taken_shield += (std::uint64_t)std::lround(took);
-                            // still counts as dealt damage for owner
-                            if (h.owner) {
-                                if (auto* om = state.metrics_for(*h.owner))
-                                    om->damage_dealt += (std::uint64_t)std::lround(took);
-                            }
-                            dmg -= took; // remaining damage continues to plates/HP
-                            if (dmg < 0.0f)
-                                dmg = 0.0f;
-                        }
-                        if (dmg > 0.0f && e.stats.plates > 0) {
-                            e.stats.plates -= 1;
-                            // metrics: plate consumed
-                            if (auto* pm = state.metrics_for(e.vid))
-                                pm->plates_consumed += 1;
-                            dmg = 0.0f;
-                        }
-                        if (dmg > 0.0f) {
-                            float reduction = std::max(0.0f, e.stats.armor - (float)ap);
-                            reduction = std::min(75.0f, reduction);
-                            float scale = 1.0f - reduction * 0.01f;
-                            int delt = (int)std::ceil((double)dmg * (double)scale);
-                            std::uint32_t before = e.health;
-                            e.health = (e.health > (uint32_t)delt) ? (e.health - (uint32_t)delt) : 0u;
-                            // metrics: damage to HP
-                            if (auto* pm = state.metrics_for(e.vid))
-                                pm->damage_taken_hp += (std::uint64_t)(before - e.health);
-                            // attribute as dealt
-                            if (h.owner) {
-                                if (auto* om = state.metrics_for(*h.owner))
-                                    om->damage_dealt += (std::uint64_t)delt;
-                            }
-                        }
-                    } else {
-                        // NPC path (existing logic)
-                        if (e.stats.plates > 0) {
-                            e.stats.plates -= 1;
-                            dmg = 0.0f;
-                        }
-                        if (dmg > 0.0f) {
-                            float reduction = std::max(0.0f, e.stats.armor - (float)ap);
-                            reduction = std::min(75.0f, reduction); // cap benefit
-                            float scale = 1.0f - reduction * 0.01f;
-                            int delt = (int)std::ceil((double)dmg * (double)scale);
-                            e.health = (e.health > (uint32_t)delt) ? (e.health - (uint32_t)delt) : 0u;
-                            // Attribute damage dealt to owner if any
-                            if (h.owner) {
-                                if (auto* pm = state.metrics_for(*h.owner))
-                                    pm->damage_dealt += (std::uint64_t)delt;
-                            }
-                        }
-                    }
-                    // mark damage time (for shield regen delay if applicable)
-                    e.time_since_damage = 0.0f;
-                    if (e.type_ == ids::ET_NPC && e.health == 0) {
-                        // drop chance
-                        glm::vec2 pos = e.pos;
-                        e.active = false;
-                        // Metrics: kills
-                        state.metrics.enemies_slain += 1;
-                        state.metrics.enemies_slain_by_type[(int)e.type_] += 1;
-                        if (h.owner) {
-                            if (auto* pm = state.metrics_for(*h.owner))
-                                pm->enemies_slain += 1;
-                        }
-                        // basic drop: 50% chance to drop something
-                        static thread_local std::mt19937 rng{std::random_device{}()};
-                        std::uniform_real_distribution<float> U(0.0f, 1.0f);
-                        if (U(rng) < 0.5f && g_lua_mgr) {
-                            glm::vec2 place_pos = ensure_not_in_block(state, pos);
-                            const auto& dt = g_lua_mgr->drops();
-                            auto pick_weighted = [&](const std::vector<DropEntry>& v) -> int {
-                                if (v.empty())
-                                    return -1;
-                                float sum = 0.0f;
-                                for (auto const& de : v)
-                                    sum += de.weight;
-                                if (sum <= 0.0f)
-                                    return -1;
-                                std::uniform_real_distribution<float> du(0.0f, sum);
-                                float r = du(rng);
-                                float acc = 0.0f;
-                                for (auto const& de : v) {
-                                    acc += de.weight;
-                                    if (r <= acc)
-                                        return de.type;
-                                }
-                                return v.back().type;
-                            };
-                            if (!dt.powerups.empty() || !dt.items.empty() || !dt.guns.empty()) {
-                                float c = U(rng);
-                                if (c < 0.5f && !dt.powerups.empty()) {
-                                    int t = pick_weighted(dt.powerups);
-                                    if (t >= 0) {
-                                        auto it = std::find_if(
-                                            g_lua_mgr->powerups().begin(),
-                                            g_lua_mgr->powerups().end(),
-                                            [&](const PowerupDef& p) { return p.type == t; });
-                                        if (it != g_lua_mgr->powerups().end()) {
-                                            auto* p = state.pickups.spawn((std::uint32_t)it->type,
-                                                                          it->name, place_pos);
-                                            if (p) {
-                                                state.metrics.powerups_spawned += 1;
-                                                if (g_sprite_ids) {
-                                                    if (!it->sprite.empty() &&
-                                                        it->sprite.find(':') != std::string::npos)
-                                                        p->sprite_id =
-                                                            g_sprite_ids->try_get(it->sprite);
-                                                    else
-                                                        p->sprite_id = -1;
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else if (c < 0.85f && !dt.items.empty()) {
-                                    int t = pick_weighted(dt.items);
-                                    if (t >= 0) {
-                                        auto it = std::find_if(
-                                            g_lua_mgr->items().begin(), g_lua_mgr->items().end(),
-                                            [&](const ItemDef& d) { return d.type == t; });
-                                        if (it != g_lua_mgr->items().end()) {
-                                            auto iv = state.items.spawn_from_def(*it, 1);
-                                            if (iv) {
-                                                state.ground_items.spawn(*iv, place_pos);
-                                                state.metrics.items_spawned += 1;
-                                            }
-                                        }
-                                    }
-                                } else if (!dt.guns.empty()) {
-                                    int t = pick_weighted(dt.guns);
-                                    if (t >= 0) {
-                                        auto itg = std::find_if(
-                                            g_lua_mgr->guns().begin(), g_lua_mgr->guns().end(),
-                                            [&](const GunDef& g) { return g.type == t; });
-                                        if (itg != g_lua_mgr->guns().end()) {
-                                            auto inst = state.guns.spawn_from_def(*itg);
-                                            int gspr = -1;
-                                            if (g_sprite_ids) {
-                                                if (!itg->sprite.empty() &&
-                                                    itg->sprite.find(':') != std::string::npos)
-                                                    gspr = g_sprite_ids->try_get(itg->sprite);
-                                                else
-                                                    gspr = -1;
-                                            }
-                                            if (inst) {
-                                                state.ground_guns.spawn(*inst, place_pos, gspr);
-                                                state.metrics.guns_spawned += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                            } else if (U(rng) < 0.5f && !g_lua_mgr->powerups().empty()) {
-                                std::uniform_int_distribution<int> di(
-                                    0, (int)g_lua_mgr->powerups().size() - 1);
-                                auto& pu = g_lua_mgr->powerups()[(size_t)di(rng)];
-                                auto* p = state.pickups.spawn((std::uint32_t)pu.type, pu.name, place_pos);
-                                if (p) {
-                                    state.metrics.powerups_spawned += 1;
-                                    if (!pu.sprite.empty() &&
-                                        pu.sprite.find(':') != std::string::npos)
-                                        p->sprite_id = sprites.try_get(pu.sprite);
-                                    else
-                                        p->sprite_id = -1;
-                                }
-                            } else if (U(rng) < 0.8f && !g_lua_mgr->items().empty()) {
-                                std::uniform_int_distribution<int> di2(
-                                    0, (int)g_lua_mgr->items().size() - 1);
-                                auto idf = g_lua_mgr->items()[(size_t)di2(rng)];
-                                auto iv = state.items.spawn_from_def(idf, 1);
-                                if (iv)
-                                    if (state.ground_items.spawn(*iv, place_pos))
-                                        state.metrics.items_spawned += 1;
-                            } else if (!g_lua_mgr->guns().empty()) {
-                                std::uniform_int_distribution<int> di3(
-                                    0, (int)g_lua_mgr->guns().size() - 1);
-                                auto gd = g_lua_mgr->guns()[(size_t)di3(rng)];
-                                auto inst = state.guns.spawn_from_def(gd);
-                                int gspr = -1;
-                                if (g_sprite_ids) {
-                                    if (!gd.sprite.empty() &&
-                                        gd.sprite.find(':') != std::string::npos)
-                                        gspr = g_sprite_ids->try_get(gd.sprite);
-                                    else
-                                        gspr = -1;
-                                }
-                                if (inst)
-                                    if (state.ground_guns.spawn(*inst, place_pos, gspr))
-                                        state.metrics.guns_spawned += 1;
-                            }
-                        }
-                    }
-                }
-            } */
-
+            
             // After-physics ticking (opt-in)
             if (state.player_vid && g_lua_mgr) {
                 Entity* plat = state.entities.get_mut(*state.player_vid);
@@ -1415,8 +1143,9 @@ init_ok:
         
         // Simulation-side crate progression
         sim_update_crates_open(state);
-        // Render a full frame via renderer module
-        render_frame(window, renderer, textures, ui_font, state, gfx, dt_sec, binds, projectiles, sounds);
+        // Render a full frame via renderer module (windowed mode only)
+        if (!arg_headless)
+            render_frame(window, renderer, textures, ui_font, state, gfx, dt_sec, binds, projectiles, sounds);
 
 
         // FPS calculation using high-resolution timer
@@ -1434,7 +1163,8 @@ init_ok:
             char tmp[32];
             std::snprintf(tmp, sizeof(tmp), "%d", last_fps);
             title_buf += tmp;
-            SDL_SetWindowTitle(window, title_buf.c_str());
+            if (!arg_headless && window)
+                SDL_SetWindowTitle(window, title_buf.c_str());
         }
 
         // Auto-exit after a fixed number of frames if requested.
@@ -1444,10 +1174,7 @@ init_ok:
         }
     }
 
-    if (renderer) {
-        SDL_DestroyRenderer(renderer);
-    }
-    SDL_DestroyWindow(window);
+    shutdown_graphics(gfx);
     if (ui_font)
         TTF_CloseFont(ui_font);
     sounds.shutdown();
