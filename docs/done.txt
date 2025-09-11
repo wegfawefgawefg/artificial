@@ -72,6 +72,24 @@ Session: Accuracy, Shotguns, Pages, Metrics, UX
 
 Session: Ammo System, Panels, Inventory UX
 - Ammo types: Added `register_ammo{ name,type,desc,sprite,size_x,size_y,speed,damage_mult,armor_pen,shield_mult,range,falloff_start,falloff_end,falloff_min_mult,pierce_count, on_hit,on_hit_entity,on_hit_tile }`.
+
+Refactor: Globals and signatures (2025-09)
+-----------------------------------------
+
+- Introduced global singletons in `src/globals.hpp` for shared subsystems: `g_gfx` (window/renderer/font), `g_audio` (sound store), `g_mods`, `g_sprite_ids`, `g_sprite_store`, `g_textures`, `g_binds`, `g_input`, `g_settings`, and `g_state`.
+- Moved projectiles into `State` as `state.projectiles`.
+- Added `State::dt` and set it each frame; consumers read from `g_state->dt`.
+- Updated function signatures to avoid passing globals:
+  - `render_frame()` (no args; uses globals)
+  - `generate_room()` (no args; uses globals)
+  - `sim_step_projectiles()` (no args; uses `state.projectiles`)
+  - `build_inputs(...)` no longer takes `dt` (reads from `g_state->dt`).
+- Cleaned up ambiguous conditionals and shadowed locals to satisfy strict warnings.
+
+Next candidates:
+- Remove remaining `Graphics&` parameters (e.g., `build_inputs(...)`, `sim_move_and_collide(...)`) and use `g_gfx` internally.
+- Gradually expand `RuntimeSettings` to replace hard constants (dash timings, spread dynamics) with runtime-tunable values.
+- Optionally remove `State&` parameters from Lua manager calls where they already reference `g_state`.
 - Gun ↔ Ammo: Guns can declare `compatible_ammo = { {type=.., weight=..}, ... }`. Ammo is selected at gun spawn (weighted) or via Lua.
 - Ammo behavior: Entity‑only armor penetration, shield multiplier, range + linear falloff, and `pierce_count` through entities.
 - Ammo hooks: on_hit/on_hit_entity/on_hit_tile invoked on impact.

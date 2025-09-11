@@ -1,11 +1,10 @@
 #pragma once
 
 #include "graphics.hpp"
-#include "projectiles.hpp"
 #include "state.hpp"
 
 // Generate a new room/world and spawn entities.
-void generate_room(Projectiles& projectiles, Graphics& gfx);
+void generate_room();
 
 // Helpers used during generation and spawn safety.
 bool tile_blocks_entity(const State& state, int x, int y);

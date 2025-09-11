@@ -30,8 +30,8 @@ void process_events(SDL_Event& ev, InputContext& ctx, bool& request_quit) {
     }
 }
 
-void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& gfx,
-                  float dt) {
+void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& gfx) {
+    float dt = g_state ? static_cast<float>(g_state->dt) : 0.0f;
     auto& state = *g_state;
     if (is_down(SDL_SCANCODE_ESCAPE))
         state.running = false;

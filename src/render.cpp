@@ -42,10 +42,10 @@ static inline void ui_draw_kv_line(SDL_Renderer* renderer, TTF_Font* font,
 }
 }
 
-void render_frame(Graphics& gfx,
-                  double dt_sec,
-                  const Projectiles& projectiles) {
+void render_frame() {
     auto& state = *g_state;
+    auto& gfx = *g_gfx;
+    double dt_sec = state.dt;
     SDL_Renderer* renderer = gfx.renderer;
     if (!renderer) {
         SDL_Delay(16);
@@ -540,7 +540,7 @@ void render_frame(Graphics& gfx,
     }
 
     // draw projectiles (prefer sprite; fallback to red rect)
-    for (auto const& proj : projectiles.items)
+    for (auto const& proj : state.projectiles.items)
         if (proj.active) {
             SDL_FPoint c = world_to_screen(proj.pos.x - proj.size.x * 0.5f, proj.pos.y - proj.size.y * 0.5f);
             float scale = TILE_SIZE * gfx.play_cam.zoom;

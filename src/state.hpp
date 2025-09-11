@@ -8,6 +8,7 @@
 #include "items.hpp"
 #include "particles.hpp"
 #include "pickups.hpp"
+#include "projectiles.hpp"
 #include "stage.hpp"
 #include "types.hpp"
 
@@ -19,6 +20,8 @@
 #include <vector>
 
 struct State {
+    // Frame delta (seconds), updated each frame in main loop
+    double dt{0.0};
     int mode{ids::MODE_TITLE};
     bool mouse_mode{true};
     MouseInputs mouse_inputs = MouseInputs::make();
@@ -53,6 +56,8 @@ struct State {
     GroundGunsPool ground_guns{};
     CratesPool crates{};
     int default_crate_type{0};
+    // Projectiles (moved into State)
+    Projectiles projectiles{};
 
     // Firing cooldown (seconds)
     float gun_cooldown{0.0f};

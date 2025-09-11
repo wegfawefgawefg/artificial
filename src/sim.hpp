@@ -26,7 +26,7 @@ void sim_ground_repulsion();
 void sim_update_crates_open();
 
 // Step projectiles and resolve hits (damage, drops, metrics).
-void sim_step_projectiles(Projectiles& projectiles);
+void sim_step_projectiles();
 
 // Manual pickup handling (F key) for best-overlap ground item/gun with sounds and metrics.
 void sim_handle_pickups();

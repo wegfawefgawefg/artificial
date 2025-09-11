@@ -29,5 +29,5 @@ struct InputContext {
 };
 
 void process_events(SDL_Event& ev, InputContext& ctx, bool& request_quit);
-void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& gfx, float dt);
+void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& gfx);
 void process_input_per_mode(Graphics& gfx);

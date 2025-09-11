@@ -163,8 +163,7 @@ int main(int argc, char** argv) {
     // Prepare projectiles then generate initial room
     RuntimeSettings settings{};
     g_settings = &settings;
-    Projectiles projectiles{};
-    generate_room(projectiles, gfx);
+    generate_room();
 
     bool running = true;
     InputBindings binds{};
@@ -197,9 +196,10 @@ int main(int argc, char** argv) {
 
         Uint64 t_now = SDL_GetPerformanceCounter();
         double dt_sec = static_cast<double>(t_now - t_last) / static_cast<double>(perf_freq);
+        state.dt = dt_sec;
         t_last = t_now;
 
-        build_inputs(binds, ictx, gfx, static_cast<float>(dt_sec));
+        build_inputs(binds, ictx, gfx);
         // Age alerts and purge expired
         for (auto& al : state.alerts) {
             al.age += static_cast<float>(dt_sec);
@@ -839,7 +839,7 @@ int main(int argc, char** argv) {
                         glm::vec2 pdir{aim.x * cs - aim.y * sn, aim.x * sn + aim.y * cs};
                         pdir = glm::normalize(pdir);
                         glm::vec2 sp = p + pdir * GUN_MUZZLE_OFFSET_UNITS;
-                        auto* pr = projectiles.spawn(sp, pdir * proj_speed, proj_size, proj_steps, proj_type);
+                        auto* pr = g_state ? g_state->projectiles.spawn(sp, pdir * proj_speed, proj_size, proj_steps, proj_type) : nullptr;
                         if (pr && state.player_vid)
                             pr->owner = state.player_vid;
                         if (pr) {
@@ -1014,7 +1014,7 @@ int main(int argc, char** argv) {
             }
 
             // step projectiles with on-hit applying damage and drops
-            sim_step_projectiles(projectiles);
+            sim_step_projectiles();
             
             // After-physics ticking (opt-in)
             if (state.player_vid && g_lua_mgr) {
@@ -1103,7 +1103,7 @@ int main(int argc, char** argv) {
                 std::printf("[room] Entering next area.\n");
                 state.alerts.push_back({"Entering next area", 0.0f, 2.0f, false});
                 state.mode = ids::MODE_PLAYING;
-                generate_room(projectiles, gfx);
+                generate_room();
                 state.input_lockout_timer = 0.25f; // avoid firing immediately after click
             }
         }
@@ -1112,7 +1112,7 @@ int main(int argc, char** argv) {
         sim_update_crates_open();
         // Render a full frame via renderer module (windowed mode only)
         if (!arg_headless)
-            render_frame(gfx, dt_sec, projectiles);
+            render_frame();
 
 
         // FPS calculation using high-resolution timer

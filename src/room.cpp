@@ -11,10 +11,11 @@
 #include <filesystem>
 #include <random>
 
-void generate_room(Projectiles& projectiles, Graphics& gfx) {
+void generate_room() {
     auto& state = *g_state;
+    auto& gfx = *g_gfx;
     // Reset world
-    projectiles = Projectiles{};
+    state.projectiles = Projectiles{};
     state.entities = Entities{};
     state.player_vid.reset();
     state.start_tile = {-1, -1};

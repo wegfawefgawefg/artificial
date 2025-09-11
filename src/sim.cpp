@@ -569,7 +569,7 @@ void sim_update_crates_open() {
         }
 }
 
-void sim_step_projectiles(Projectiles& projectiles) {
+void sim_step_projectiles() {
     auto& state = *g_state;
     struct HitInfo {
         std::size_t eid;
@@ -582,7 +582,7 @@ void sim_step_projectiles(Projectiles& projectiles) {
         int proj_def_type;
     };
     std::vector<HitInfo> hits;
-    projectiles.step(
+    state.projectiles.step(
         TIMESTEP, state.stage, state.entities.data(),
         [&](Projectile& pr, const Entity& hit) -> bool {
             if (g_lua_mgr && pr.def_type)
