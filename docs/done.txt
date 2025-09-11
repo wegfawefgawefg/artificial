@@ -78,6 +78,17 @@ Session: Ammo System, Panels, Inventory UX
 - Lua API: `api.set_equipped_ammo(type)` (compat‑checked) and `api.set_equipped_ammo_force(type)` (always). Both raise brief alerts.
 - UI formatting: key/value lines with consistent 2‑decimal formatting for floats.
 - Right gun panel: Moved up and enlarged; shows full gun + ammo stats and sprites; toggled by `V`.
+
+Refactor: render/sim extraction (2025-09-11)
+-------------------------------------------
+- Moved all rendering out of `src/main.cpp` into `src/render.cpp` (`render_frame(...)`).
+- Moved simulation helpers into `src/sim.cpp` (`sim_*` functions) and called from the fixed-step loop.
+- Restored/expanded UI:
+  - Ground inspect panel (toggle V), character slide-out (C), equipped gun panel (V).
+  - Reticle UI (spread circle; mag/reserve bars; Active Reload window; JAMMED/RELOAD/NO AMMO), held-gun rotation.
+  - Bottom bars (shield/plates/health/dash); NPC HP/shield/plates (always visible).
+  - Exit countdown bar; Score Review page (animated metrics + sounds); Next Stage page.
+- Fixed number-row equip (1–0) to equip guns when not in drop mode.
 - Center inspect panel: Inventory hover after ~0.12s shows details; when standing over ground item/gun and `V` is ON, shows that ground target’s details.
 - Inventory list: draws icons next to names; drag‑and‑drop reordering between slots; clicking slots does not use items.
 - Input change: `V` no longer toggles camera follow; it toggles the gun info panel.

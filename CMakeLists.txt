@@ -35,6 +35,16 @@ add_executable(gub
   src/mods.cpp
   src/sprites.hpp
   src/sprites.cpp
+  src/globals.hpp
+  src/globals.cpp
+  src/room.hpp
+  src/room.cpp
+  src/app.hpp
+  src/app.cpp
+  src/render.hpp
+  src/render.cpp
+  src/sim.hpp
+  src/sim.cpp
 )
 
 function(target_enable_strict_warnings tgt)

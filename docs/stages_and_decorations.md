@@ -6,7 +6,7 @@ Overview
 - Two clean pages between rooms:
   - Stage Review: full-screen page after exit countdown finishes; shows metrics for the room.
   - Next Area: full-screen page with details of the next room; confirm proceeds to generate it.
-- Gameplay HUD/World render only during `MODE_PLAYING`. Pages hide crosshair, HUD bars, world, prompts.
+- Rendering moved to `src/render.cpp`. Gameplay HUD/World renders during `MODE_PLAYING`; pages (Score Review / Next Stage) render full-screen overlays and hide crosshair, HUD bars, world, and prompts.
 - Exit countdown reduced to 5s; review page input delay is short (≈0.8s) to prevent accidental skip.
 
 Controls on Pages
@@ -66,7 +66,6 @@ Lua API (proposed)
 Implementation Plan (engine)
 ----------------------------
 1) Metrics: add counters in State; accumulate during room, display on Stage Review.
-2) Pages: render headings + metrics (review) and next room info (next); suppress HUD/world.
+2) Pages (render.cpp): Score Review shows animated metrics (one reveal per 0.2s; ticking numbers); Next Stage shows heading and continue prompt. HUD/world suppressed.
 3) Rooms: introduce a simple rotation of 3 room generators; call appropriate Lua hooks.
 4) Decorations: add a Decorations list with sprite id and pos; render in world pass with Y‑based sort.
-

@@ -1,6 +1,10 @@
 // Minimal SDL2 window + GLM usage
 #include "config.hpp"
 #include "graphics.hpp"
+#include "app.hpp"
+#include "render.hpp"
+#include "sim.hpp"
+#include "globals.hpp"
 #include "input_system.hpp"
 #include "luamgr.hpp"
 #include "mods.hpp"
@@ -27,55 +31,14 @@
 
 // Helpers
 struct Projectiles; // fwd
-static void generate_room(State& state, Projectiles& projectiles, SDL_Renderer* renderer,
-                          Graphics& gfx);
-// UI helpers
-namespace {
-static inline std::string fmt2(float v) {
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%.2f", (double)v);
-    return std::string(buf);
-}
-static inline void ui_draw_kv_line(SDL_Renderer* renderer, TTF_Font* font,
-                                   int tx, int& ty, int lh,
-                                   const char* key, const std::string& value,
-                                   SDL_Color key_color = SDL_Color{150,150,150,255},
-                                   SDL_Color val_color = SDL_Color{230,230,230,255}) {
-    // key
-    SDL_Surface* ks = TTF_RenderUTF8_Blended(font, (std::string(key)+": ").c_str(), key_color);
-    int keyw=0,keyh=0; SDL_Texture* kt=nullptr;
-    if (ks) { kt = SDL_CreateTextureFromSurface(renderer, ks);
-        SDL_QueryTexture(kt,nullptr,nullptr,&keyw,&keyh);
-        SDL_Rect kd{tx, ty, keyw, keyh}; SDL_RenderCopy(renderer, kt, nullptr, &kd);
-        SDL_DestroyTexture(kt); SDL_FreeSurface(ks);
-    }
-    // value
-    SDL_Surface* vs = TTF_RenderUTF8_Blended(font, value.c_str(), val_color);
-    if (vs) { SDL_Texture* vt = SDL_CreateTextureFromSurface(renderer, vs);
-        int vw=0,vh=0; SDL_QueryTexture(vt,nullptr,nullptr,&vw,&vh);
-        SDL_Rect vd{tx+keyw, ty, vw, vh}; SDL_RenderCopy(renderer, vt, nullptr, &vd);
-        SDL_DestroyTexture(vt); SDL_FreeSurface(vs);
-    }
-    ty += lh;
-}
-}
-static LuaManager* g_lua_mgr = nullptr;
-static SpriteIdRegistry* g_sprite_ids = nullptr;
-static bool tile_blocks_entity(const State& state, int x, int y);
-static glm::ivec2 nearest_walkable_tile(const State& state, glm::ivec2 t, int max_radius);
-static glm::vec2 ensure_not_in_block(const State& state, glm::vec2 pos);
+#include "room.hpp"
+// render helpers moved to render.cpp
+// defined in globals.cpp
+// LuaManager* g_lua_mgr;
+// SpriteIdRegistry* g_sprite_ids;
+// moved to room.hpp/room.cpp
 
-static bool try_init_video_with_driver(const char* driver) {
-    if (driver) {
-        setenv("SDL_VIDEODRIVER", driver, 1);
-    }
-    if (SDL_Init(SDL_INIT_VIDEO) == 0)
-        return true;
-    const char* err = SDL_GetError();
-    std::fprintf(stderr, "SDL_Init failed (driver=%s): %s\n", driver ? driver : "auto",
-                 (err && *err) ? err : "(no error text)");
-    return false;
-}
+// moved to app.cpp
 
 int main(int argc, char** argv) {
     // Lightweight CLI args for non-interactive testing
@@ -341,256 +304,14 @@ init_ok:
             state.time_since_last_update -= TIMESTEP;
 
             // Before-physics ticking (opt-in)
-            if (state.player_vid && g_lua_mgr) {
-                Entity* plbt = state.entities.get_mut(*state.player_vid);
-                if (plbt) {
-                    const float dt = TIMESTEP;
-                    const int MAX_TICKS = 4000;
-                    int tick_calls = 0;
-                    // Guns with on_step
-                    for (const auto& entry : state.inventory.entries) {
-                        if (entry.kind != INV_GUN)
-                            continue;
-                        GunInstance* gi = state.guns.get(entry.vid);
-                        if (!gi)
-                            continue;
-                        const GunDef* gd = nullptr;
-                        for (auto const& g : g_lua_mgr->guns())
-                            if (g.type == gi->def_type) {
-                                gd = &g;
-                                break;
-                            }
-                        if (!gd || gd->on_step_ref < 0)
-                            continue;
-                        if (gd->tick_rate_hz <= 0.0f || gd->tick_phase == "after")
-                            continue;
-                        gi->tick_acc += dt;
-                        float period = 1.0f / std::max(1.0f, gd->tick_rate_hz);
-                        while (gi->tick_acc >= period && tick_calls < MAX_TICKS) {
-                            g_lua_mgr->call_gun_on_step(gi->def_type, state, *plbt);
-                            gi->tick_acc -= period;
-                            ++tick_calls;
-                        }
-                    }
-                    // Items with on_tick
-                    for (const auto& entry : state.inventory.entries) {
-                        if (entry.kind != INV_ITEM)
-                            continue;
-                        ItemInstance* inst = state.items.get(entry.vid);
-                        if (!inst)
-                            continue;
-                        const ItemDef* idf = nullptr;
-                        for (auto const& d : g_lua_mgr->items())
-                            if (d.type == inst->def_type) {
-                                idf = &d;
-                                break;
-                            }
-                        if (!idf || idf->on_tick_ref < 0)
-                            continue;
-                        if (idf->tick_rate_hz <= 0.0f || idf->tick_phase == "after")
-                            continue;
-                        inst->tick_acc += dt;
-                        float period = 1.0f / std::max(1.0f, idf->tick_rate_hz);
-                        while (inst->tick_acc >= period && tick_calls < MAX_TICKS) {
-                            g_lua_mgr->call_item_on_tick(inst->def_type, state, *plbt, period);
-                            inst->tick_acc -= period;
-                            ++tick_calls;
-                        }
-                    }
-                }
-            }
+            sim_pre_physics_ticks(state);
 
             // Movement + physics: player controlled + NPC wander; keep inside non-block tiles
-            for (auto& e : state.entities.data()) {
-                if (!e.active)
-                    continue;
-                e.time_since_damage += TIMESTEP;
-                if (e.type_ == ids::ET_PLAYER) {
-                    glm::vec2 dir{0.0f, 0.0f};
-                    if (state.playing_inputs.left)
-                        dir.x -= 1.0f;
-                    if (state.playing_inputs.right)
-                        dir.x += 1.0f;
-                    if (state.playing_inputs.up)
-                        dir.y -= 1.0f;
-                    if (state.playing_inputs.down)
-                        dir.y += 1.0f;
-                    if (dir.x != 0.0f || dir.y != 0.0f)
-                        dir = glm::normalize(dir);
-                    // Scale base speed by stats.move_speed (350 baseline)
-                    float scale =
-                        (e.stats.move_speed > 0.0f) ? (e.stats.move_speed / 350.0f) : 1.0f;
-                    // Dash handling: quick burst in WASD (8-way) direction with rechargeable stocks
-                    state.dash_timer = std::max(0.0f, state.dash_timer - TIMESTEP);
-                    if (state.dash_stocks < state.dash_max) {
-                        state.dash_refill_timer += TIMESTEP;
-                        while (state.dash_refill_timer >= DASH_COOLDOWN_SECONDS &&
-                               state.dash_stocks < state.dash_max) {
-                            state.dash_refill_timer -= DASH_COOLDOWN_SECONDS;
-                            state.dash_stocks += 1;
-                        }
-                    } else {
-                        state.dash_refill_timer = 0.0f;
-                    }
-                    static bool prev_dash = false;
-                    bool now_dash = state.playing_inputs.dash;
-                    if (now_dash && !prev_dash && state.dash_stocks > 0) {
-                        // Require a movement direction; use 8-way WASD vector
-                        if (dir.x != 0.0f || dir.y != 0.0f) {
-                            state.dash_dir = dir; // already normalized
-                            state.dash_timer = DASH_TIME_SECONDS;
-                            state.dash_stocks -= 1;
-                            // Metrics: dashes used and distance (approximate)
-                            if (state.player_vid) {
-                                if (auto* pm = state.metrics_for(*state.player_vid)) {
-                                    pm->dashes_used += 1;
-                                    pm->dash_distance += DASH_SPEED_UNITS_PER_SEC * DASH_TIME_SECONDS;
-                                }
-                            }
-                            state.reticle_shake =
-                                std::max(state.reticle_shake, 8.0f); // kick the reticle
-                            if (g_lua_mgr && state.player_vid) {
-                                if (auto* pl = state.entities.get_mut(*state.player_vid))
-                                    g_lua_mgr->call_on_dash(state, *pl);
-                            }
-                        }
-                    }
-                    prev_dash = now_dash;
-                    // Update movement spread accumulator (per-entity)
-                    {
-                        float spd = std::sqrt(e.vel.x * e.vel.x + e.vel.y * e.vel.y);
-                        // Normalize by baseline player speed in world units/sec
-                        float factor = std::clamp(spd / PLAYER_SPEED_UNITS_PER_SEC, 0.0f, 4.0f);
-                        if (factor > 0.01f) {
-                            e.move_spread_deg = std::min(e.stats.move_spread_max_deg,
-                                e.move_spread_deg + e.stats.move_spread_inc_rate_deg_per_sec_at_base * factor * TIMESTEP);
-                        } else {
-                            e.move_spread_deg = std::max(0.0f,
-                                e.move_spread_deg - e.stats.move_spread_decay_deg_per_sec * TIMESTEP);
-                        }
-                    }
-                    if (state.dash_timer > 0.0f) {
-                        // Move in latched WASD direction
-                        e.vel = state.dash_dir * DASH_SPEED_UNITS_PER_SEC;
-                    } else {
-                        e.vel = dir * (PLAYER_SPEED_UNITS_PER_SEC * scale);
-                    }
-                } else {
-                    // NPC random drift
-                    if (e.rot <= 0.0f) {
-                        static thread_local std::mt19937 rng{std::random_device{}()};
-                        std::uniform_int_distribution<int> dirD(0, 4);
-                        std::uniform_real_distribution<float> dur(0.5f, 2.0f);
-                        int dir = dirD(rng);
-                        glm::vec2 v{0, 0};
-                        if (dir == 0)
-                            v = {-1, 0};
-                        else if (dir == 1)
-                            v = {1, 0};
-                        else if (dir == 2)
-                            v = {0, -1};
-                        else if (dir == 3)
-                            v = {0, 1};
-                        e.vel = v * 2.0f; // 2 units/s
-                        e.rot = dur(rng); // reuse rot as timer here for simplicity
-                    } else {
-                        e.rot -= TIMESTEP;
-                    }
-                }
-                int steps = std::max(1, e.physics_steps);
-                glm::vec2 step_dpos = e.vel * (TIMESTEP / static_cast<float>(steps));
-                for (int s = 0; s < steps; ++s) {
-                    // X axis
-                    float next_x = e.pos.x + step_dpos.x;
-                    {
-                        glm::vec2 half = e.half_size();
-                        glm::vec2 tl = {next_x - half.x, e.pos.y - half.y};
-                        glm::vec2 br = {next_x + half.x, e.pos.y + half.y};
-                        int minx = (int)floorf(tl.x), miny = (int)floorf(tl.y),
-                            maxx = (int)floorf(br.x), maxy = (int)floorf(br.y);
-                        bool blocked = false;
-                        for (int y = miny; y <= maxy && !blocked; ++y)
-                            for (int x = minx; x <= maxx; ++x)
-                                if (state.stage.in_bounds(x, y) &&
-                                    state.stage.at(x, y).blocks_entities()) {
-                                    blocked = true;
-                                }
-                        if (!blocked)
-                            e.pos.x = next_x;
-                        else {
-                            e.vel.x = 0.0f;
-                        }
-                    }
-                    // Y axis
-                    float next_y = e.pos.y + step_dpos.y;
-                    {
-                        glm::vec2 half = e.half_size();
-                        glm::vec2 tl = {e.pos.x - half.x, next_y - half.y};
-                        glm::vec2 br = {e.pos.x + half.x, next_y + half.y};
-                        int minx = (int)floorf(tl.x), miny = (int)floorf(tl.y),
-                            maxx = (int)floorf(br.x), maxy = (int)floorf(br.y);
-                        bool blocked = false;
-                        for (int y = miny; y <= maxy && !blocked; ++y)
-                            for (int x = minx; x <= maxx; ++x)
-                                if (state.stage.in_bounds(x, y) &&
-                                    state.stage.at(x, y).blocks_entities()) {
-                                    blocked = true;
-                                }
-                        if (!blocked)
-                            e.pos.y = next_y;
-                        else {
-                            e.vel.y = 0.0f;
-                        }
-                    }
-                }
-            }
+            sim_move_and_collide(state, gfx);
 
             // Shield regeneration after delay (3s no damage), global step, and active reload
             // progress/completion
-            for (auto& e : state.entities.data()) {
-                if (!e.active)
-                    continue;
-                if (e.stats.shield_max > 0.0f && e.time_since_damage >= 3.0f) {
-                    float before = e.shield;
-                    e.shield =
-                        std::min(e.stats.shield_max, e.shield + e.stats.shield_regen * TIMESTEP);
-                    (void)before;
-                }
-                // Active reload progress/completion (player only for now)
-                if (e.type_ == ids::ET_PLAYER && e.equipped_gun_vid.has_value()) {
-                    if (auto* gi = state.guns.get(*e.equipped_gun_vid)) {
-                        if (gi->reloading) {
-                            const GunDef* gd = nullptr;
-                            if (g_lua_mgr) {
-                                for (auto const& g : g_lua_mgr->guns())
-                                    if (g.type == gi->def_type) {
-                                        gd = &g;
-                                        break;
-                                    }
-                            }
-                            if (gi->reload_eject_remaining > 0.0f) {
-                                gi->reload_eject_remaining =
-                                    std::max(0.0f, gi->reload_eject_remaining - TIMESTEP);
-                            } else if (gi->reload_total_time > 0.0f) {
-                                gi->reload_progress = std::min(
-                                    1.0f, gi->reload_progress + (TIMESTEP / gi->reload_total_time));
-                            }
-                            if (gi->reload_progress >= 1.0f) {
-                                if (gd && gi->ammo_reserve > 0) {
-                                    int take = std::min(gd->mag, gi->ammo_reserve);
-                                    gi->current_mag = take;
-                                    gi->ammo_reserve -= take;
-                                }
-                                gi->reloading = false;
-                                gi->reload_progress = 0.0f;
-                                // Ensure pending burst doesn't resume after normal reload
-                                gi->burst_remaining = 0;
-                                gi->burst_timer = 0.0f;
-                            }
-                        }
-                    }
-                }
-            }
+            sim_shield_and_reload(state);
 
                     // Auto-pickup powerups on overlap
                     if (state.mode == ids::MODE_PLAYING && state.player_vid) {
@@ -620,541 +341,16 @@ init_ok:
 
             // Item pickup with F key; ground guns equip or add to inventory as VIDs
             if (state.mode == ids::MODE_PLAYING && state.player_vid) {
-                const Entity* p = state.entities.get(*state.player_vid);
-                if (p) {
-                    glm::vec2 ph = p->half_size();
-                    float pl = p->pos.x - ph.x, pr = p->pos.x + ph.x;
-                    float pt = p->pos.y - ph.y, pb = p->pos.y + ph.y;
-                    static bool prev_pick = false;
-                    bool now_pick = state.playing_inputs.pick_up;
-                    if (now_pick && !prev_pick && state.pickup_lockout == 0.0f) {
-                        bool did_pick = false;
-                        // Find single best overlap among guns/items by intersection area
-                        enum class PickKind { None, Gun, Item };
-                        PickKind best_kind = PickKind::None;
-                        std::size_t best_index = (std::size_t)-1;
-                        float best_area = 0.0f;
-                        auto overlap_area = [&](float al, float at, float ar, float ab, float bl,
-                                               float bt, float br, float bb) -> float {
-                            float xl = std::max(al, bl);
-                            float xr = std::min(ar, br);
-                            float yt = std::max(at, bt);
-                            float yb = std::min(ab, bb);
-                            float w = xr - xl;
-                            float h = yb - yt;
-                            if (w <= 0.0f || h <= 0.0f)
-                                return 0.0f;
-                            return w * h;
-                        };
-                        // Guns
-                        for (std::size_t i = 0; i < state.ground_guns.data().size(); ++i) {
-                            auto const& gg = state.ground_guns.data()[i];
-                            if (!gg.active)
-                                continue;
-                            glm::vec2 gh = gg.size * 0.5f;
-                            float gl = gg.pos.x - gh.x, gr = gg.pos.x + gh.x;
-                            float gt = gg.pos.y - gh.y, gb = gg.pos.y + gh.y;
-                            float area = overlap_area(pl, pt, pr, pb, gl, gt, gr, gb);
-                            if (area > best_area) {
-                                best_area = area;
-                                best_kind = PickKind::Gun;
-                                best_index = i;
-                            }
-                        }
-                        // Items
-                        for (std::size_t i = 0; i < state.ground_items.data().size(); ++i) {
-                            auto const& gi = state.ground_items.data()[i];
-                            if (!gi.active)
-                                continue;
-                            glm::vec2 gh = gi.size * 0.5f;
-                            float gl = gi.pos.x - gh.x, gr = gi.pos.x + gh.x;
-                            float gt = gi.pos.y - gh.y, gb = gi.pos.y + gh.y;
-                            float area = overlap_area(pl, pt, pr, pb, gl, gt, gr, gb);
-                            if (area > best_area) {
-                                best_area = area;
-                                best_kind = PickKind::Item;
-                                best_index = i;
-                            }
-                        }
-                        if (best_kind == PickKind::Gun) {
-                            auto& gg = state.ground_guns.data()[best_index];
-                            bool ok = state.inventory.insert_existing(INV_GUN, gg.gun_vid);
-                            std::string nm = "gun";
-                            if (g_lua_mgr) {
-                                if (const GunInstance* gi = state.guns.get(gg.gun_vid)) {
-                                    for (auto const& g : g_lua_mgr->guns())
-                                        if (g.type == gi->def_type) {
-                                            nm = g.name;
-                                            break;
-                                        }
-                                }
-                            }
-                            if (ok) {
-                                gg.active = false;
-                                did_pick = true;
-                        state.alerts.push_back(
-                            {std::string("Picked up ") + nm, 0.0f, 2.0f, false});
-                        // Metrics
-                        if (state.player_vid) {
-                            if (auto* pm = state.metrics_for(*state.player_vid))
-                                pm->guns_picked += 1;
-                        }
-                                if (const GunInstance* ggi = state.guns.get(gg.gun_vid)) {
-                                    const GunDef* gd = nullptr;
-                                    if (g_lua_mgr) {
-                                        for (auto const& g : g_lua_mgr->guns())
-                                            if (g.type == ggi->def_type) {
-                                                gd = &g;
-                                                break;
-                                            }
-                                    }
-                                    if (g_lua_mgr && state.player_vid) {
-                                        if (auto* plent = state.entities.get_mut(*state.player_vid))
-                                            g_lua_mgr->call_gun_on_pickup(ggi->def_type, state,
-                                                                          *plent);
-                                    }
-                                    if (gd)
-                                        sounds.play(gd->sound_pickup.empty() ? "base:drop"
-                                                                             : gd->sound_pickup);
-                                    else
-                                        sounds.play("base:drop");
-                                }
-                            } else {
-                                state.alerts.push_back(
-                                    {"Inventory full", 0.0f, 1.5f, false});
-                            }
-                        } else if (best_kind == PickKind::Item) {
-                            auto& gi = state.ground_items.data()[best_index];
-                            // Stacking/insert logic for a single item instance
-                            std::string nm = "item";
-                            int maxc = 1;
-                            const ItemInstance* pick = state.items.get(gi.item_vid);
-                            if (g_lua_mgr && pick) {
-                                for (auto const& d : g_lua_mgr->items())
-                                    if (d.type == pick->def_type) {
-                                        nm = d.name;
-                                        maxc = d.max_count;
-                                        break;
-                                    }
-                            }
-                            bool fully_merged = false;
-                            if (pick) {
-                                for (auto& e : state.inventory.entries) {
-                                    if (e.kind != INV_ITEM)
-                                        continue;
-                                    ItemInstance* tgt = state.items.get(e.vid);
-                                    if (!tgt)
-                                        continue;
-                                    if (tgt->def_type != pick->def_type)
-                                        continue;
-                                    if (tgt->modifiers_hash != pick->modifiers_hash)
-                                        continue;
-                                    if (tgt->use_cooldown_countdown > 0.0f ||
-                                        pick->use_cooldown_countdown > 0.0f)
-                                        continue;
-                                    if (tgt->count >= (uint32_t)maxc)
-                                        continue;
-                                    uint32_t space = (uint32_t)maxc - tgt->count;
-                                    uint32_t xfer = std::min(space, pick->count);
-                                    tgt->count += xfer;
-                                    if (auto* pmut = state.items.get(gi.item_vid)) {
-                                        pmut->count -= xfer;
-                                    }
-                                    const ItemInstance* after = state.items.get(gi.item_vid);
-                                    if (!after || after->count == 0) {
-                                        state.items.free(gi.item_vid);
-                                        gi.active = false;
-                                        fully_merged = true;
-                                        did_pick = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (!fully_merged) {
-                                bool ok = state.inventory.insert_existing(INV_ITEM, gi.item_vid);
-                                if (ok) {
-                                    gi.active = false;
-                                    did_pick = true;
-                                    if (pick) { // sound on pickup
-                                        const ItemDef* idf = nullptr;
-                                        if (g_lua_mgr) {
-                                            for (auto const& d : g_lua_mgr->items())
-                                                if (d.type == pick->def_type) {
-                                                    idf = &d;
-                                                    break;
-                                                }
-                                        }
-                                        if (g_lua_mgr && state.player_vid) {
-                                            if (auto* plent = state.entities.get_mut(*state.player_vid))
-                                                g_lua_mgr->call_item_on_pickup(pick->def_type, state,
-                                                                              *plent);
-                                        }
-                                        if (idf)
-                                            sounds.play(idf->sound_pickup.empty() ? "base:drop"
-                                                                                   : idf->sound_pickup);
-                                        else
-                                            sounds.play("base:drop");
-                                    }
-                                } else {
-                                    state.alerts.push_back(
-                                        {std::string("Inventory full"), 0.0f, 1.5f, false});
-                                }
-                            }
-                            if (!nm.empty())
-                                state.alerts.push_back(
-                                    {std::string("Picked up ") + nm, 0.0f, 2.0f, false});
-                        }
-                        if (did_pick)
-                            state.pickup_lockout = PICKUP_DEBOUNCE_SECONDS;
-                    }
-                    prev_pick = now_pick;
-                    // consumed above; no-op here
-                    // Simple separation to avoid intersecting ground items
-                    for (auto& giA : state.ground_items.data())
-                        if (giA.active) {
-                            for (auto& giB : state.ground_items.data())
-                                if (&giA != &giB && giB.active) {
-                                    glm::vec2 ah = giA.size * 0.5f, bh = giB.size * 0.5f;
-                                    bool overlap = !((giA.pos.x + ah.x) <= (giB.pos.x - bh.x) ||
-                                                     (giA.pos.x - ah.x) >= (giB.pos.x + bh.x) ||
-                                                     (giA.pos.y + ah.y) <= (giB.pos.y - bh.y) ||
-                                                     (giA.pos.y - ah.y) >= (giB.pos.y + bh.y));
-                                    if (overlap) {
-                                        glm::vec2 d = giA.pos - giB.pos;
-                                        if (d.x == 0 && d.y == 0)
-                                            d = {0.01f, 0.0f};
-                                        float len = std::sqrt(d.x * d.x + d.y * d.y);
-                                        if (len < 1e-3f)
-                                            len = 1.0f;
-                                        d /= len;
-                                        giA.pos += d * 0.01f;
-                                        giB.pos -= d * 0.01f;
-                                    }
-                                }
-                        }
-                    for (auto& ga : state.ground_guns.data())
-                        if (ga.active) {
-                            for (auto& gb : state.ground_guns.data())
-                                if (&ga != &gb && gb.active) {
-                                    glm::vec2 ah = ga.size * 0.5f, bh = gb.size * 0.5f;
-                                    bool overlap = !((ga.pos.x + ah.x) <= (gb.pos.x - bh.x) ||
-                                                     (ga.pos.x - ah.x) >= (gb.pos.x + bh.x) ||
-                                                     (ga.pos.y + ah.y) <= (gb.pos.y - bh.y) ||
-                                                     (ga.pos.y - ah.y) >= (gb.pos.y + bh.y));
-                                    if (overlap) {
-                                        glm::vec2 d = ga.pos - gb.pos;
-                                        if (d.x == 0 && d.y == 0)
-                                            d = {0.01f, 0.0f};
-                                        float len = std::sqrt(d.x * d.x + d.y * d.y);
-                                        if (len < 1e-3f)
-                                            len = 1.0f;
-                                        d /= len;
-                                        ga.pos += d * 0.01f;
-                                        gb.pos -= d * 0.01f;
-                                    }
-                                }
-                        }
-                }
+                sim_handle_pickups(state, sounds);
+                // Simple separation to avoid intersecting ground items/guns
+                sim_ground_repulsion(state);
             }
 
             // Toggle drop mode on Q edge
-            {
-                static bool prev_drop = false;
-                if (state.playing_inputs.drop && !prev_drop) {
-                    state.drop_mode = !state.drop_mode;
-                    state.alerts.push_back({state.drop_mode
-                                                ? std::string("Drop mode: press 1–0 to drop")
-                                                : std::string("Drop canceled"),
-                                            0.0f, 2.0f, false});
-                }
-                prev_drop = state.playing_inputs.drop;
-            }
+            sim_toggle_drop_mode(state);
 
             // Number keys: either drop from slot (if in drop mode) or select/use/equip
-            {
-                bool nums[10] = {state.playing_inputs.num_row_1, state.playing_inputs.num_row_2,
-                                 state.playing_inputs.num_row_3, state.playing_inputs.num_row_4,
-                                 state.playing_inputs.num_row_5, state.playing_inputs.num_row_6,
-                                 state.playing_inputs.num_row_7, state.playing_inputs.num_row_8,
-                                 state.playing_inputs.num_row_9, state.playing_inputs.num_row_0};
-                static bool prev[10] = {false};
-                for (int i = 0; i < 10; ++i) {
-                    if (nums[i] && !prev[i]) {
-                        // Map: key1..key9 -> slots 0..8, key0 -> slot 9
-                        std::size_t idx = (i == 9) ? 9 : (std::size_t)i;
-                        state.inventory.set_selected_index(idx);
-                        const InvEntry* ent = state.inventory.selected_entry();
-                        if (state.drop_mode) {
-                            if (!ent) {
-                                state.alerts.push_back(
-                                    {std::string("Slot empty"), 0.0f, 1.5f, false});
-                            } else if (state.player_vid) {
-                                const Entity* p = state.entities.get(*state.player_vid);
-                                if (p) {
-                                    glm::vec2 place_pos = ensure_not_in_block(state, p->pos);
-                                    if (ent->kind == INV_GUN) {
-                                        // Move same gun instance to ground
-                                        // Determine sprite from gun def
-                                        int gspr = -1;
-                                        std::string nm = "gun";
-                                        if (g_lua_mgr) {
-                                            const GunInstance* gi = state.guns.get(ent->vid);
-                                            if (gi) {
-                                                for (auto const& g : g_lua_mgr->guns())
-                                                    if (g.type == gi->def_type) {
-                                                        nm = g.name;
-                                                        if (g_sprite_ids) {
-                                                            if (!g.sprite.empty() &&
-                                                                g.sprite.find(':') !=
-                                                                    std::string::npos) {
-                                                                gspr =
-                                                                    g_sprite_ids->try_get(g.sprite);
-                                                            } else {
-                                                                gspr = -1;
-                                                            }
-                                                        }
-                                                        break;
-                                                    }
-                                            }
-                                        }
-                                        // If dropping the equipped gun, un-equip first
-                                        if (state.player_vid) {
-                                            Entity* pme = state.entities.get_mut(*state.player_vid);
-                                            if (pme && pme->equipped_gun_vid.has_value() &&
-                                                pme->equipped_gun_vid->id == ent->vid.id &&
-                                                pme->equipped_gun_vid->version ==
-                                                    ent->vid.version) {
-                                                pme->equipped_gun_vid.reset();
-                                            }
-                                        }
-                                        // Hook: on_drop for gun
-                                        if (g_lua_mgr && state.player_vid) {
-                                            if (const GunInstance* gi = state.guns.get(ent->vid)) {
-                                                if (auto* plent =
-                                                        state.entities.get_mut(*state.player_vid))
-                                                    g_lua_mgr->call_gun_on_drop(gi->def_type, state,
-                                                                               *plent);
-                                            }
-                                        }
-                                        state.ground_guns.spawn(ent->vid, place_pos, gspr);
-                                        // Metrics
-                                        if (state.player_vid) {
-                                            if (auto* pm = state.metrics_for(*state.player_vid))
-                                                pm->guns_dropped += 1;
-                                        }
-                                        state.inventory.remove_slot(idx);
-                                        state.alerts.push_back(
-                                            {std::string("Dropped gun: ") + nm, 0.0f, 2.0f, false});
-                                    } else {
-                                        // Item: drop one; split if stack > 1
-                                        if (const ItemInstance* inst = state.items.get(ent->vid)) {
-                                            int def_type = inst->def_type;
-                                            std::string nm = "item";
-                                            bool consume = false;
-                                            uint32_t maxc = 1;
-                                            int category = 1;
-                                            if (g_lua_mgr) {
-                                                for (auto const& d : g_lua_mgr->items())
-                                                    if (d.type == def_type) {
-                                                        nm = d.name;
-                                                        consume = d.consume_on_use;
-                                                        maxc = (uint32_t)d.max_count;
-                                                        category = d.category;
-                                                        break;
-                                                    }
-                                            }
-                                            if (inst->count > 1) {
-                                                // decrement original, create new instance with
-                                                // count=1
-                                                if (auto* mut = state.items.get(ent->vid)) {
-                                                    if (mut->count > 0)
-                                                        mut->count -= 1;
-                                                }
-                                                // new instance
-                                                ItemDef tmp{};
-                                                tmp.type = def_type;
-                                                tmp.max_count = (int)maxc;
-                                                tmp.consume_on_use = consume;
-                                                tmp.category = category;
-                                                auto newv = state.items.spawn_from_def(tmp, 1);
-                                                if (newv) {
-                                                    // Hook: on_drop for item (split)
-                                                    if (g_lua_mgr && state.player_vid) {
-                                                        if (auto* plent = state.entities.get_mut(
-                                                                *state.player_vid))
-                                                            g_lua_mgr->call_item_on_drop(
-                                                                def_type, state, *plent);
-                                                    }
-                                                state.ground_items.spawn(*newv, place_pos);
-                                                if (state.player_vid) {
-                                                    if (auto* pm = state.metrics_for(*state.player_vid))
-                                                        pm->items_dropped += 1;
-                                                }
-                                                }
-                                            } else {
-                                                // move the instance itself
-                                                if (g_lua_mgr && state.player_vid) {
-                                                    if (auto* plent = state.entities.get_mut(
-                                                            *state.player_vid))
-                                                        g_lua_mgr->call_item_on_drop(
-                                                            def_type, state, *plent);
-                                                }
-                                                state.ground_items.spawn(ent->vid, place_pos);
-                                                state.inventory.remove_slot(idx);
-                                            }
-                                            state.alerts.push_back(
-                                                {std::string("Dropped ") + nm, 0.0f, 2.0f, false});
-                                        }
-                                    }
-                                }
-                            }
-                            state.drop_mode = false; // one-shot
-                        } else {
-                            if (ent) {
-                                if (ent->kind == INV_GUN) {
-                                    if (state.player_vid)
-                                        if (auto* pl = state.entities.get_mut(*state.player_vid)) {
-                                            pl->equipped_gun_vid = ent->vid;
-                                            state.gun_panel_shake =
-                                                std::max(state.gun_panel_shake, 8.0f);
-                                            // Alert with gun name
-                                            std::string nm = "gun";
-                                            if (g_lua_mgr) {
-                                                if (const GunInstance* gi =
-                                                        state.guns.get(ent->vid)) {
-                                                    for (auto const& g : g_lua_mgr->guns())
-                                                        if (g.type == gi->def_type) {
-                                                            nm = g.name;
-                                                            break;
-                                                        }
-                                                }
-                                            }
-                                            state.alerts.push_back(
-                                                {std::string("Equipped gun: ") + nm, 0.0f, 2.0f,
-                                                 false});
-                                        }
-                                } else if (ent->kind == INV_ITEM) {
-                                    if (g_lua_mgr && state.player_vid) {
-                                        if (auto* pl = state.entities.get_mut(*state.player_vid)) {
-                                            if (const ItemInstance* inst =
-                                                    state.items.get(ent->vid)) {
-                                                int def_type = inst->def_type;
-                                                (void)g_lua_mgr->call_item_on_use(def_type, state,
-                                                                                  *pl, nullptr);
-                                                // sound on use
-                                                const ItemDef* idf = nullptr;
-                                                for (auto const& d : g_lua_mgr->items())
-                                                    if (d.type == def_type) {
-                                                        idf = &d;
-                                                        break;
-                                                    }
-                                                if (idf)
-                                                    sounds.play(idf->sound_use.empty()
-                                                                    ? "base:ui_confirm"
-                                                                    : idf->sound_use);
-                                                // consume if def says so
-                                                bool consume = false;
-                                                for (auto const& d : g_lua_mgr->items())
-                                                    if (d.type == def_type) {
-                                                        consume = d.consume_on_use;
-                                                        break;
-                                                    }
-                                                if (consume) {
-                                                    if (auto* mut = state.items.get(ent->vid)) {
-                                                        if (mut->count > 0)
-                                                            mut->count -= 1;
-                                                    }
-                                                    const ItemInstance* after =
-                                                        state.items.get(ent->vid);
-                                                    if (!after || after->count == 0) {
-                                                        state.items.free(ent->vid);
-                                                        state.inventory.remove_slot(idx);
-                                                    }
-                                                }
-                                                // alert
-                                                std::string nm = "item";
-                                                for (auto const& d : g_lua_mgr->items())
-                                                    if (d.type == def_type) {
-                                                        nm = d.name;
-                                                        break;
-                                                    }
-                                                state.alerts.push_back(
-                                                    {std::string("Used ") + nm, 0.0f, 2.0f, false});
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    // Cross separation between ground items and ground guns
-                    for (auto& gi : state.ground_items.data())
-                        if (gi.active) {
-                            glm::vec2 ih = gi.size * 0.5f;
-                            for (auto& gg : state.ground_guns.data())
-                                if (gg.active) {
-                                    glm::vec2 gh = gg.size * 0.5f;
-                                    bool overlap = !((gi.pos.x + ih.x) <= (gg.pos.x - gh.x) ||
-                                                     (gi.pos.x - ih.x) >= (gg.pos.x + gh.x) ||
-                                                     (gi.pos.y + ih.y) <= (gg.pos.y - gh.y) ||
-                                                     (gi.pos.y - ih.y) >= (gg.pos.y + gh.y));
-                                    if (overlap) {
-                                        glm::vec2 d = gi.pos - gg.pos;
-                                        if (d.x == 0 && d.y == 0)
-                                            d = {0.01f, 0.0f};
-                                        float len = std::sqrt(d.x * d.x + d.y * d.y);
-                                        if (len < 1e-3f)
-                                            len = 1.0f;
-                                        d /= len;
-                                        gi.pos += d * 0.01f;
-                                        gg.pos -= d * 0.01f;
-                                    }
-                                }
-                        }
-                    // Push ground items and guns away from crates (chests)
-                    for (auto& c : state.crates.data())
-                        if (c.active) {
-                            glm::vec2 ch = c.size * 0.5f;
-                            for (auto& gi : state.ground_items.data())
-                                if (gi.active) {
-                                    glm::vec2 ih = gi.size * 0.5f;
-                                    bool overlap = !((gi.pos.x + ih.x) <= (c.pos.x - ch.x) ||
-                                                     (gi.pos.x - ih.x) >= (c.pos.x + ch.x) ||
-                                                     (gi.pos.y + ih.y) <= (c.pos.y - ch.y) ||
-                                                     (gi.pos.y - ih.y) >= (c.pos.y + ch.y));
-                                    if (overlap) {
-                                        glm::vec2 d = gi.pos - c.pos;
-                                        if (d.x == 0 && d.y == 0)
-                                            d = {0.01f, 0.0f};
-                                        float len = std::sqrt(d.x * d.x + d.y * d.y);
-                                        if (len < 1e-3f)
-                                            len = 1.0f;
-                                        d /= len;
-                                        gi.pos += d * 0.02f;
-                                    }
-                                }
-                            for (auto& gg : state.ground_guns.data())
-                                if (gg.active) {
-                                    glm::vec2 gh = gg.size * 0.5f;
-                                    bool overlap = !((gg.pos.x + gh.x) <= (c.pos.x - ch.x) ||
-                                                     (gg.pos.x - gh.x) >= (c.pos.x + ch.x) ||
-                                                     (gg.pos.y + gh.y) <= (c.pos.y - ch.y) ||
-                                                     (gg.pos.y - gh.y) >= (c.pos.y + ch.y));
-                                    if (overlap) {
-                                        glm::vec2 d = gg.pos - c.pos;
-                                        if (d.x == 0 && d.y == 0)
-                                            d = {0.01f, 0.0f};
-                                        float len = std::sqrt(d.x * d.x + d.y * d.y);
-                                        if (len < 1e-3f)
-                                            len = 1.0f;
-                                        d /= len;
-                                        gg.pos += d * 0.02f;
-                                    }
-                                }
-                        }
-                    }
-                    prev[i] = nums[i];
-                }
-            }
+            sim_inventory_number_row(state);
 
             // Accumulate time-in-stage metrics
             if (state.mode == ids::MODE_PLAYING) {
@@ -1898,46 +1094,9 @@ init_ok:
             }
 
             // step projectiles with on-hit applying damage and drops
-            struct HitInfo {
-                std::size_t eid;
-                std::optional<VID> owner;
-                float base_damage;
-                float armor_pen;      // 0..1
-                float shield_mult;
-                int ammo_type;
-                float travel_dist;
-                int proj_def_type;
-            };
-            std::vector<HitInfo> hits;
-            projectiles.step(
-                TIMESTEP, state.stage, state.entities.data(),
-                [&](Projectile& pr, const Entity& hit) -> bool {
-                    if (g_lua_mgr && pr.def_type)
-                        g_lua_mgr->call_projectile_on_hit_entity(pr.def_type);
-                    if (g_lua_mgr && pr.ammo_type)
-                        g_lua_mgr->call_ammo_on_hit_entity(pr.ammo_type), g_lua_mgr->call_ammo_on_hit(pr.ammo_type);
-                    // Attribute hit to owner for accuracy metrics
-                    if (pr.owner) {
-                        if (auto* pm = state.metrics_for(*pr.owner))
-                            pm->shots_hit += 1;
-                    }
-                    hits.push_back(HitInfo{hit.vid.id, pr.owner, pr.base_damage, pr.armor_pen,
-                                            pr.shield_mult, pr.ammo_type, pr.distance_travelled,
-                                            pr.def_type});
-                    bool stop = true;
-                    if (pr.pierce_remaining > 0) {
-                        pr.pierce_remaining -= 1;
-                        stop = false;
-                    }
-                    return stop;
-                },
-                [&](Projectile& pr) {
-                    if (g_lua_mgr && pr.def_type)
-                        g_lua_mgr->call_projectile_on_hit_tile(pr.def_type);
-                    if (g_lua_mgr && pr.ammo_type)
-                        g_lua_mgr->call_ammo_on_hit_tile(pr.ammo_type), g_lua_mgr->call_ammo_on_hit(pr.ammo_type);
-                });
-            for (auto h : hits) {
+            sim_step_projectiles(state, projectiles);
+            // After projectile resolution
+            /* for (auto h : hits) {
                 auto id = h.eid;
                 if (id >= state.entities.data().size())
                     continue;
@@ -2171,7 +1330,7 @@ init_ok:
                         }
                     }
                 }
-            }
+            } */
 
             // After-physics ticking (opt-in)
             if (state.player_vid && g_lua_mgr) {
@@ -2264,7 +1423,14 @@ init_ok:
                 state.input_lockout_timer = 0.25f; // avoid firing immediately after click
             }
         }
-
+        
+        // Simulation-side crate progression
+        sim_update_crates_open(state);
+        // Render a full frame via renderer module
+        render_frame(window, renderer, textures, ui_font, state, gfx, dt_sec, binds, projectiles, sounds);
+        // Legacy inlined rendering kept below temporarily (disabled)
+        #if 0
+        
         // Paint a background every frame
         if (renderer) {
             SDL_SetRenderDrawColor(renderer, 18, 18, 20, 255); // dark gray
@@ -2313,159 +1479,60 @@ init_ok:
                 }
                 }
             }
-            // Crate interaction: only in gameplay
-            if (state.mode == ids::MODE_PLAYING && state.player_vid) {
-                const Entity* p = state.entities.get(*state.player_vid);
-                if (p) {
-                    glm::vec2 ph = p->half_size();
-                    float pl = p->pos.x - ph.x, pr = p->pos.x + ph.x, pt = p->pos.y - ph.y,
-                          pb = p->pos.y + ph.y;
-                    for (auto& c : state.crates.data())
-                        if (c.active && !c.opened) {
-                            glm::vec2 ch = c.size * 0.5f;
-                            float cl = c.pos.x - ch.x, cr = c.pos.x + ch.x, ct = c.pos.y - ch.y,
-                                  cb = c.pos.y + ch.y;
-                            bool overlap = !(pr <= cl || pl >= cr || pb <= ct || pt >= cb);
-                            float open_time = 5.0f;
-                            if (g_lua_mgr) {
-                                if (auto const* cd = g_lua_mgr->find_crate(c.def_type))
-                                    open_time = cd->open_time;
-                            }
-                            if (overlap) {
-                                c.open_progress = std::min(open_time, c.open_progress + TIMESTEP);
-                            } else {
-                                c.open_progress = std::max(0.0f, c.open_progress - TIMESTEP * 0.5f);
-                            }
-                            // draw crate
-                            SDL_FPoint c0 = world_to_screen(c.pos.x - ch.x, c.pos.y - ch.y);
-                            float scale = TILE_SIZE * gfx.play_cam.zoom;
-                            SDL_Rect rc{(int)std::floor(c0.x), (int)std::floor(c0.y),
-                                        (int)std::ceil(c.size.x * scale),
-                                        (int)std::ceil(c.size.y * scale)};
-                            SDL_SetRenderDrawColor(renderer, 120, 80, 40, 255);
-                            SDL_RenderFillRect(renderer, &rc);
-                            SDL_SetRenderDrawColor(renderer, 200, 160, 100, 255);
-                            SDL_RenderDrawRect(renderer, &rc);
-                            // label above
-                            if (ui_font && g_lua_mgr) {
-                                std::string label = "Crate";
-                                if (auto const* cd = g_lua_mgr->find_crate(c.def_type))
-                                    label = cd->label.empty() ? cd->name : cd->label;
-                                SDL_Color lc{240, 220, 80, 255};
-                                SDL_Surface* lsrf =
-                                    TTF_RenderUTF8_Blended(ui_font, label.c_str(), lc);
-                                if (lsrf) {
-                                    SDL_Texture* lt = SDL_CreateTextureFromSurface(renderer, lsrf);
-                                    int tw = 0, th = 0;
-                                    SDL_QueryTexture(lt, nullptr, nullptr, &tw, &th);
-                                    SDL_Rect ld{rc.x + (rc.w - tw) / 2, rc.y - th - 18, tw, th};
-                                    SDL_RenderCopy(renderer, lt, nullptr, &ld);
-                                    SDL_DestroyTexture(lt);
-                                    SDL_FreeSurface(lsrf);
-                                }
-                            }
-                            // progress bar above
-                            int bw = rc.w;
-                            int bh = 8;
-                            int bx = rc.x;
-                            int by = rc.y - 14;
-                            SDL_Rect pbg{bx, by, bw, bh};
-                            SDL_SetRenderDrawColor(renderer, 30, 30, 30, 200);
-                            SDL_RenderFillRect(renderer, &pbg);
-                            int fw = (int)std::lround(
-                                (double)bw *
-                                (double)(c.open_progress / std::max(0.0001f, open_time)));
-                            SDL_Rect pfg{bx, by, fw, bh};
-                            SDL_SetRenderDrawColor(renderer, 240, 220, 80, 230);
-                            SDL_RenderFillRect(renderer, &pfg);
-                            // open action
-                            if (c.open_progress >= open_time) {
-                                c.opened = true;
-                                c.active = false;
-                                // Metrics: crate opened
-                                state.metrics.crates_opened += 1;
-                                // drop some loot
-                                glm::vec2 pos = c.pos;
-                                if (g_lua_mgr) {
-                                    // crate-specific drops if defined else global
-                                    DropTables dt{};
-                                    bool have = false;
-                                    if (auto const* cd = g_lua_mgr->find_crate(c.def_type)) {
-                                        dt = cd->drops;
-                                        have = true;
-                                    }
-                                    if (!have)
-                                        dt = g_lua_mgr->drops();
-                                    static thread_local std::mt19937 rng{std::random_device{}()};
-                                    std::uniform_real_distribution<float> U(0.0f, 1.0f);
-                                    auto pick_weighted =
-                                        [&](const std::vector<DropEntry>& v) -> int {
-                                        if (v.empty())
-                                            return -1;
-                                        float sum = 0.0f;
-                                        for (auto const& de : v)
-                                            sum += de.weight;
-                                        if (sum <= 0.0f)
-                                            return -1;
-                                        std::uniform_real_distribution<float> du(0.0f, sum);
-                                        float r = du(rng);
-                                        float acc = 0.0f;
-                                        for (auto const& de : v) {
-                                            acc += de.weight;
-                                            if (r <= acc)
-                                                return de.type;
-                                        }
-                                        return v.back().type;
-                                    };
-                                    // decide: items mostly, occasional gun
-                                    float cval = U(rng);
-                                    if (cval < 0.6f && !dt.items.empty()) {
-                                        int t = pick_weighted(dt.items);
-                                        if (t >= 0) {
-                                            auto it = std::find_if(
-                                                g_lua_mgr->items().begin(),
-                                                g_lua_mgr->items().end(),
-                                                [&](const ItemDef& d) { return d.type == t; });
-                                            if (it != g_lua_mgr->items().end()) {
-                                                auto iv = state.items.spawn_from_def(*it, 1);
-                                                if (iv) {
-                                                    state.ground_items.spawn(*iv, pos);
-                                                    state.metrics.items_spawned += 1;
-                                                }
-                                            }
-                                        }
-                                    } else if (!dt.guns.empty()) {
-                                        int t = pick_weighted(dt.guns);
-                                        if (t >= 0) {
-                                            auto ig = std::find_if(
-                                                g_lua_mgr->guns().begin(), g_lua_mgr->guns().end(),
-                                                [&](const GunDef& g) { return g.type == t; });
-                                            if (ig != g_lua_mgr->guns().end()) {
-                                                auto gv = state.guns.spawn_from_def(*ig);
-                                                int sid = -1;
-                                                if (g_sprite_ids) {
-                                                    if (!ig->sprite.empty() &&
-                                                        ig->sprite.find(':') != std::string::npos)
-                                                        sid = g_sprite_ids->try_get(ig->sprite);
-                                                }
-                                                if (gv) {
-                                                    state.ground_guns.spawn(*gv, pos, sid);
-                                                    state.metrics.guns_spawned += 1;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // on_open hook
-                                    if (state.player_vid) {
-                                        auto* plent = state.entities.get_mut(*state.player_vid);
-                                        if (plent)
-                                            g_lua_mgr->call_crate_on_open(c.def_type, state,
-                                                                          *plent);
-                                    }
-                                }
+            // Crate open/loot progression handled in sim now
+            sim_update_crates_open(state);
+            // Draw crates (visuals only)
+            if (state.mode == ids::MODE_PLAYING) {
+                for (auto& c : state.crates.data())
+                    if (c.active && !c.opened) {
+                        glm::vec2 ch = c.size * 0.5f;
+                        // world → screen rect
+                        SDL_FPoint c0 = world_to_screen(c.pos.x - ch.x, c.pos.y - ch.y);
+                        float scale = TILE_SIZE * gfx.play_cam.zoom;
+                        SDL_Rect rc{(int)std::floor(c0.x), (int)std::floor(c0.y),
+                                    (int)std::ceil(c.size.x * scale),
+                                    (int)std::ceil(c.size.y * scale)};
+                        SDL_SetRenderDrawColor(renderer, 120, 80, 40, 255);
+                        SDL_RenderFillRect(renderer, &rc);
+                        SDL_SetRenderDrawColor(renderer, 200, 160, 100, 255);
+                        SDL_RenderDrawRect(renderer, &rc);
+                        // label above
+                        if (ui_font && g_lua_mgr) {
+                            std::string label = "Crate";
+                            if (auto const* cd = g_lua_mgr->find_crate(c.def_type))
+                                label = cd->label.empty() ? cd->name : cd->label;
+                            SDL_Color lc{240, 220, 80, 255};
+                            SDL_Surface* lsrf = TTF_RenderUTF8_Blended(ui_font, label.c_str(), lc);
+                            if (lsrf) {
+                                SDL_Texture* lt = SDL_CreateTextureFromSurface(renderer, lsrf);
+                                int tw = 0, th = 0;
+                                SDL_QueryTexture(lt, nullptr, nullptr, &tw, &th);
+                                SDL_Rect ld{rc.x + (rc.w - tw) / 2, rc.y - th - 18, tw, th};
+                                SDL_RenderCopy(renderer, lt, nullptr, &ld);
+                                SDL_DestroyTexture(lt);
+                                SDL_FreeSurface(lsrf);
                             }
                         }
-                }
+                        // progress bar above (visual ratio from open_progress/open_time)
+                        float open_time = 5.0f;
+                        if (g_lua_mgr) {
+                            if (auto const* cd = g_lua_mgr->find_crate(c.def_type))
+                                open_time = cd->open_time;
+                        }
+                        int bw = rc.w;
+                        int bh = 8;
+                        int bx = rc.x;
+                        int by = rc.y - 14;
+                        SDL_Rect pbg{bx, by, bw, bh};
+                        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 200);
+                        SDL_RenderFillRect(renderer, &pbg);
+                        int fw = (int)std::lround((double)bw *
+                                                  (double)(c.open_progress / std::max(0.0001f, open_time)));
+                        fw = std::clamp(fw, 0, bw);
+                        SDL_Rect pfg{bx, by, fw, bh};
+                        SDL_SetRenderDrawColor(renderer, 240, 220, 80, 230);
+                        SDL_RenderFillRect(renderer, &pfg);
+                    }
             }
             // draw entities (only during gameplay)
             if (state.mode == ids::MODE_PLAYING)
@@ -3717,220 +2784,6 @@ init_ok:
             }
 
             // Right-side selected item details panel removed in favor of hover center panel
-            if (false) {
-                const InvEntry* sel = state.inventory.selected_entry();
-                if (sel) {
-                    int panel_w = (int)std::lround(width * 0.26);
-                    int px = width - panel_w - 30;
-                    int py = (int)std::lround(height * 0.60);
-                    if (state.gun_panel_shake > 0.01f) {
-                        static thread_local std::mt19937 rng{std::random_device{}()};
-                        std::uniform_real_distribution<float> J(-state.gun_panel_shake,
-                                                                state.gun_panel_shake);
-                        px += (int)std::lround(J(rng));
-                        py += (int)std::lround(J(rng));
-                        state.gun_panel_shake *= 0.88f;
-                    } else {
-                        state.gun_panel_shake = 0.0f;
-                    }
-                    SDL_Rect box{px, py, panel_w, 200};
-                    SDL_SetRenderDrawColor(renderer, 25, 25, 30, 220);
-                    SDL_RenderFillRect(renderer, &box);
-                    SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255);
-                    SDL_RenderDrawRect(renderer, &box);
-                    int tx = px + 12;
-                    int ty = py + 12;
-                    int lh = 18;
-                    auto draw_txt = [&](const std::string& s, SDL_Color col) {
-                        SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, s.c_str(), col);
-                        if (srf) {
-                            SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, srf);
-                            int tw = 0, th = 0;
-                            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                            SDL_Rect d{tx, ty, tw, th};
-                            SDL_RenderCopy(renderer, t, nullptr, &d);
-                            SDL_DestroyTexture(t);
-                            SDL_FreeSurface(srf);
-                        }
-                        ty += lh;
-                    };
-                    if (sel->kind == INV_ITEM) {
-                        if (const ItemInstance* inst = state.items.get(sel->vid)) {
-                            std::string nm = "item";
-                            std::string desc;
-                            uint32_t maxc = 1;
-                            bool consume = false;
-                            int sid = -1;
-                            if (g_lua_mgr) {
-                                for (auto const& d : g_lua_mgr->items())
-                                    if (d.type == inst->def_type) {
-                                        nm = d.name;
-                                        desc = d.desc;
-                                        maxc = (uint32_t)d.max_count;
-                                        consume = d.consume_on_use;
-                                        if (!d.sprite.empty() && d.sprite.find(':') != std::string::npos && g_sprite_ids)
-                                            sid = g_sprite_ids->try_get(d.sprite);
-                                        break;
-                                    }
-                            }
-                            // Icon
-                            if (sid >= 0) {
-                                if (SDL_Texture* tex = textures.get(sid)) {
-                                    SDL_Rect dst{tx, ty, 32, 32};
-                                    SDL_RenderCopy(renderer, tex, nullptr, &dst);
-                                    ty += 34;
-                                }
-                            }
-                            draw_txt(std::string("Selected: ") + nm, SDL_Color{255, 255, 255, 255});
-                            draw_txt(std::string("Count: ") + std::to_string(inst->count) + "/" +
-                                         std::to_string(maxc),
-                                     SDL_Color{220, 220, 220, 255});
-                            if (!desc.empty())
-                                draw_txt(std::string("Desc: ") + desc,
-                                         SDL_Color{200, 200, 200, 255});
-                            draw_txt(std::string("Consumable: ") + (consume ? "Yes" : "No"),
-                                     SDL_Color{220, 220, 220, 255});
-                        }
-                    } else if (sel->kind == INV_GUN) {
-                        if (const GunInstance* gi = state.guns.get(sel->vid)) {
-                            std::string nm = "gun";
-                            float dmg = 0.0f, rpm = 0.0f;
-                            int mag = 0, maxmag = 0, ammo_res = 0;
-                            std::string fire_mode = "auto";
-                            int burst_count = 0;
-                            float burst_rpm = 0.0f;
-                            float shot_interval = 0.0f;
-                            float burst_interval = 0.0f;
-                            int gun_sid = -1;
-                            if (g_lua_mgr) {
-                                for (auto const& g : g_lua_mgr->guns())
-                                    if (g.type == gi->def_type) {
-                                        nm = g.name;
-                                        dmg = g.damage;
-                                        rpm = g.rpm;
-                                        maxmag = g.mag;
-                                        fire_mode = g.fire_mode;
-                                        burst_count = g.burst_count;
-                                        burst_rpm = g.burst_rpm;
-                                        shot_interval = g.shot_interval;
-                                        burst_interval = g.burst_interval;
-                                        if (!g.sprite.empty() && g.sprite.find(':') != std::string::npos && g_sprite_ids)
-                                            gun_sid = g_sprite_ids->try_get(g.sprite);
-                                        break;
-                                    }
-                            }
-                            mag = gi->current_mag;
-                            ammo_res = gi->ammo_reserve;
-                            // Gun icon
-                            if (gun_sid >= 0) {
-                                if (SDL_Texture* tex = textures.get(gun_sid)) {
-                                    SDL_Rect dst{tx, ty, 48, 32};
-                                    SDL_RenderCopy(renderer, tex, nullptr, &dst);
-                                    ty += 34;
-                                }
-                            }
-                            draw_txt(std::string("Selected: ") + nm, SDL_Color{255, 255, 255, 255});
-                            draw_txt(std::string("DMG/RPM: ") + std::to_string((int)dmg) + "/" +
-                                         std::to_string((int)rpm),
-                                     SDL_Color{220, 220, 220, 255});
-                            // Timings
-                            if (rpm > 0.0f || shot_interval > 0.0f) {
-                                float dt = shot_interval > 0.0f ? shot_interval : (60.0f / std::max(1.0f, rpm));
-                                int ms = (int)std::lround(dt * 1000.0f);
-                                draw_txt(std::string("Shot Time: ") + std::to_string(ms) + " ms",
-                                         SDL_Color{220, 220, 220, 255});
-                            }
-                            if (fire_mode == "burst" && (burst_rpm > 0.0f || burst_interval > 0.0f)) {
-                                draw_txt(std::string("Burst RPM: ") + std::to_string((int)std::lround(burst_rpm)),
-                                         SDL_Color{220, 220, 220, 255});
-                                float bdt = burst_interval > 0.0f ? burst_interval : (burst_rpm > 0.0f ? 60.0f / burst_rpm : 0.0f);
-                                if (bdt > 0.0f) {
-                                    int bms = (int)std::lround(bdt * 1000.0f);
-                                    draw_txt(std::string("Burst Time: ") + std::to_string(bms) + " ms",
-                                             SDL_Color{220, 220, 220, 255});
-                                }
-                            }
-                            // Fire mode label
-                            {
-                                std::string fm_label = "Auto";
-                                if (fire_mode == "single")
-                                    fm_label = "Semi";
-                                else if (fire_mode == "burst") {
-                                    fm_label = "Burst";
-                                    if (burst_count > 0)
-                                        fm_label += std::string(" (") + std::to_string(burst_count) + ")";
-                                }
-                                draw_txt(std::string("Fire: ") + fm_label, SDL_Color{220, 220, 220, 255});
-                            }
-                            draw_txt(std::string("Mag: ") + std::to_string(mag) + "/" +
-                                         std::to_string(maxmag),
-                                     SDL_Color{220, 220, 220, 255});
-                            draw_txt(std::string("Reserve: ") + std::to_string(ammo_res),
-                                     SDL_Color{220, 220, 220, 255});
-                            // Extra gun stats (selected)
-                            if (g_lua_mgr) {
-                                for (auto const& g : g_lua_mgr->guns())
-                                    if (g.type == gi->def_type) {
-                                        draw_txt(std::string("Deviation: ") + std::to_string(g.deviation) + " deg",
-                                                 SDL_Color{220, 220, 220, 255});
-                                        draw_txt(std::string("Pellets: ") + std::to_string(g.pellets_per_shot),
-                                                 SDL_Color{220, 220, 220, 255});
-                                        draw_txt(std::string("Recoil: ") + std::to_string(g.recoil),
-                                                 SDL_Color{220, 220, 220, 255});
-                                        draw_txt(std::string("Control: ") + std::to_string(g.control),
-                                                 SDL_Color{220, 220, 220, 255});
-                                        draw_txt(std::string("Recoil cap: ") + std::to_string((int)std::lround(g.max_recoil_spread_deg)) + " deg",
-                                                 SDL_Color{220, 220, 220, 255});
-                                        draw_txt(std::string("Reload/Eject: ") + std::to_string((int)std::lround(g.reload_time * 1000.0f)) +
-                                                     std::string("/") + std::to_string((int)std::lround(g.eject_time * 1000.0f)) + " ms",
-                                                 SDL_Color{220, 220, 220, 255});
-                                        draw_txt(std::string("Jam: ") + std::to_string((int)std::lround(g.jam_chance * 100.0f)) + " %",
-                                                 SDL_Color{220, 220, 220, 255});
-                                        break;
-                                    }
-                            }
-                            // Ammo details
-                            if (gi->ammo_type != 0 && g_lua_mgr) {
-                                if (auto const* ad = g_lua_mgr->find_ammo(gi->ammo_type)) {
-                                    // Ammo icon
-                                    if (!ad->sprite.empty() && g_sprite_ids) {
-                                        int asid = g_sprite_ids->try_get(ad->sprite);
-                                        if (asid >= 0) {
-                                            if (SDL_Texture* tex = textures.get(asid)) {
-                                                SDL_Rect dst{tx, ty, 32, 20};
-                                                SDL_RenderCopy(renderer, tex, nullptr, &dst);
-                                                ty += 22;
-                                            }
-                                        }
-                                    }
-                                    draw_txt(std::string("Ammo: ") + ad->name,
-                                             SDL_Color{255, 255, 255, 255});
-                                    if (!ad->desc.empty())
-                                        draw_txt(std::string("Desc: ") + ad->desc,
-                                                 SDL_Color{200, 200, 200, 255});
-                                    // Stats summary line(s)
-                                    int apct = (int)std::lround(ad->armor_pen * 100.0f);
-                                    draw_txt(std::string("Ammo Stats: DMG x") +
-                                                 std::to_string(ad->damage_mult) +
-                                                 std::string(", AP ") + std::to_string(apct) + "%" +
-                                                 std::string(", Shield x") + std::to_string(ad->shield_mult),
-                                             SDL_Color{220, 220, 220, 255});
-                                    if (ad->range_units > 0.0f) {
-                                        draw_txt(std::string("Range: ") + std::to_string((int)std::lround(ad->range_units)) +
-                                                     std::string(" (falloff ") + std::to_string((int)std::lround(ad->falloff_start)) +
-                                                     std::string("→") + std::to_string((int)std::lround(ad->falloff_end)) +
-                                                     std::string(" @ x") + std::to_string(ad->falloff_min_mult) + ")",
-                                                 SDL_Color{220, 220, 220, 255});
-                                    }
-                                    draw_txt(std::string("Speed: ") + std::to_string((int)std::lround(ad->speed)) +
-                                                 std::string(", Pierce: ") + std::to_string(ad->pierce_count),
-                                             SDL_Color{220, 220, 220, 255});
-                                }
-                            }
-                        }
-                    }
-                }
-            }
 
             // Right-side gun panel (player's equipped) – gameplay only
             if (ui_font && state.mode == ids::MODE_PLAYING && state.player_vid && g_lua_mgr && state.show_gun_panel) {
@@ -4239,6 +3092,7 @@ init_ok:
         } else {
             SDL_Delay(16);
         }
+        #endif
 
         // FPS calculation using high-resolution timer
         // dt_sec computed above
@@ -4277,248 +3131,4 @@ init_ok:
     SDL_Quit();
     return 0;
 }
-static void generate_room(State& state, Projectiles& projectiles, SDL_Renderer* renderer,
-                          Graphics& gfx) {
-    // Reset world
-    projectiles = Projectiles{};
-    state.entities = Entities{};
-    state.player_vid.reset();
-    state.start_tile = {-1, -1};
-    state.exit_tile = {-1, -1};
-    state.exit_countdown = -1.0f;
-    state.score_ready_timer = 0.0f;
-    state.pickups.clear();
-    state.ground_items.clear();
-    // Rebuild stage
-    // Random dimensions between 32 and 64
-    std::mt19937 rng{std::random_device{}()};
-    std::uniform_int_distribution<int> dwh(32, 64);
-    std::uint32_t W = static_cast<std::uint32_t>(dwh(rng));
-    std::uint32_t H = static_cast<std::uint32_t>(dwh(rng));
-    state.stage = Stage(W, H);
-    // Reset per-stage metrics for a fresh room
-    state.metrics.reset(Entities::MAX);
-    state.stage.fill_border(TileProps::Make(true, true));
-    // sprinkle obstacles (walls and voids)
-    int tiles = static_cast<int>(W * H);
-    int obstacles = tiles / 8; // ~12.5%
-    std::uniform_int_distribution<int> dx(1, static_cast<int>(W) - 2);
-    std::uniform_int_distribution<int> dy(1, static_cast<int>(H) - 2);
-    std::uniform_int_distribution<int> type(
-        0, 3); // 0..1 void (blocks entities only), 2..3 wall (blocks both)
-
-    // Determine start and exit corners (inside border)
-    std::vector<glm::ivec2> corners = {{1, 1},
-                                       {static_cast<int>(W) - 2, 1},
-                                       {1, static_cast<int>(H) - 2},
-                                       {static_cast<int>(W) - 2, static_cast<int>(H) - 2}};
-    // Pick first two distinct non-block corners
-    int start_idx = -1, exit_idx = -1;
-    for (int i = 0; i < (int)corners.size(); ++i) {
-        auto c = corners[static_cast<size_t>(i)];
-        if (state.stage.in_bounds(c.x, c.y) && !state.stage.at(c.x, c.y).blocks_entities()) {
-            start_idx = i;
-            break;
-        }
-    }
-    for (int i = (int)corners.size() - 1; i >= 0; --i) {
-        if (i == start_idx)
-            continue;
-        auto c = corners[static_cast<size_t>(i)];
-        if (state.stage.in_bounds(c.x, c.y) && !state.stage.at(c.x, c.y).blocks_entities()) {
-            exit_idx = i;
-            break;
-        }
-    }
-    if (start_idx < 0) {
-        start_idx = 0;
-        auto c = corners[static_cast<size_t>(0)];
-        state.stage.at(c.x, c.y) = TileProps::Make(false, false);
-    }
-    if (exit_idx < 0 || exit_idx == start_idx) {
-        exit_idx = (start_idx + 3) % 4;
-        auto c = corners[static_cast<size_t>(exit_idx)];
-        state.stage.at(c.x, c.y) = TileProps::Make(false, false);
-    }
-
-    state.start_tile = corners[static_cast<size_t>(start_idx)];
-    state.exit_tile = corners[static_cast<size_t>(exit_idx)];
-    // Place obstacles now, avoiding start/exit tiles
-    for (int i = 0; i < obstacles; ++i) {
-        int x = dx(rng);
-        int y = dy(rng);
-        if ((x == state.start_tile.x && y == state.start_tile.y) ||
-            (x == state.exit_tile.x && y == state.exit_tile.y)) {
-            continue;
-        }
-        int t = type(rng);
-        if (t <= 1) {
-            state.stage.at(x, y) = TileProps::Make(true, false); // void/water: blocks entities only
-        } else {
-            state.stage.at(x, y) = TileProps::Make(true, true); // wall: blocks both
-        }
-    }
-
-    // Create player at start
-    if (auto pvid = state.entities.new_entity()) {
-        Entity* p = state.entities.get_mut(*pvid);
-        p->type_ = ids::ET_PLAYER;
-        p->size = {0.25f, 0.25f};
-        p->pos = {static_cast<float>(state.start_tile.x) + 0.5f,
-                  static_cast<float>(state.start_tile.y) + 0.5f};
-        if (g_sprite_ids)
-            p->sprite_id = g_sprite_ids->try_get("base:player");
-        p->max_hp = 1000;
-        p->health = p->max_hp;
-        p->shield = p->stats.shield_max;
-        state.player_vid = pvid;
-    }
-
-    // Spawn some NPCs
-    {
-        std::mt19937 rng2{std::random_device{}()};
-        std::uniform_int_distribution<int> dx2(1, (int)state.stage.get_width() - 2);
-        std::uniform_int_distribution<int> dy2(1, (int)state.stage.get_height() - 2);
-        for (int i = 0; i < 25; ++i) {
-            auto vid = state.entities.new_entity();
-            if (!vid)
-                break;
-            Entity* e = state.entities.get_mut(*vid);
-            e->type_ = ids::ET_NPC;
-            e->size = {0.25f, 0.25f};
-            if (g_sprite_ids)
-                e->sprite_id = g_sprite_ids->try_get("base:zombie");
-            for (int tries = 0; tries < 100; ++tries) {
-                int x = dx2(rng2), y = dy2(rng2);
-                if (!state.stage.at(x, y).blocks_entities()) {
-                    e->pos = {static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f};
-                    break;
-                }
-            }
-        }
-    }
-
-    // Camera to player and zoom for ~8%
-    if (renderer && state.player_vid) {
-        int ww = 0, wh = 0;
-        SDL_GetRendererOutputSize(renderer, &ww, &wh);
-        float min_dim = static_cast<float>(std::min(ww, wh));
-        const Entity* p = state.entities.get(*state.player_vid);
-        if (p) {
-            float desired_px = 0.08f * min_dim;
-            float zoom = desired_px / (p->size.y * TILE_SIZE);
-            zoom = std::clamp(zoom, 0.5f, 32.0f);
-            gfx.play_cam.zoom = zoom;
-            gfx.play_cam.pos = p->pos;
-        }
-    }
-
-    // Spawn a few Lua-defined pickups/items near start for testing
-    {
-        glm::vec2 base = {static_cast<float>(state.start_tile.x) + 0.5f,
-                          static_cast<float>(state.start_tile.y) + 0.5f};
-        auto place = [&](glm::vec2 offs) { return ensure_not_in_block(state, base + offs); };
-        if (g_lua_mgr && !g_lua_mgr->powerups().empty()) {
-            auto& pu = g_lua_mgr->powerups()[0];
-            auto* p = state.pickups.spawn(static_cast<std::uint32_t>(pu.type), pu.name,
-                                          place({1.0f, 0.0f}));
-            if (p && g_sprite_ids) {
-                if (!pu.sprite.empty() && pu.sprite.find(':') != std::string::npos)
-                    p->sprite_id = g_sprite_ids->try_get(pu.sprite);
-                else
-                    p->sprite_id = -1;
-            }
-        }
-        if (g_lua_mgr && g_lua_mgr->powerups().size() > 1) {
-            auto& pu = g_lua_mgr->powerups()[1];
-            auto* p = state.pickups.spawn(static_cast<std::uint32_t>(pu.type), pu.name,
-                                          place({0.0f, 1.0f}));
-            if (p && g_sprite_ids) {
-                if (!pu.sprite.empty() && pu.sprite.find(':') != std::string::npos)
-                    p->sprite_id = g_sprite_ids->try_get(pu.sprite);
-                else
-                    p->sprite_id = -1;
-            }
-        }
-        // Place example guns near spawn: pistol and rifle if present in Lua
-        if (g_lua_mgr && !g_lua_mgr->guns().empty()) {
-            auto gd = g_lua_mgr->guns()[0];
-            auto gv = state.guns.spawn_from_def(gd);
-            int sid = -1;
-            if (g_sprite_ids) {
-                if (!gd.sprite.empty() && gd.sprite.find(':') != std::string::npos)
-                    sid = g_sprite_ids->try_get(gd.sprite);
-            }
-            if (gv)
-                state.ground_guns.spawn(*gv, place({2.0f, 0.0f}), sid);
-        }
-        if (g_lua_mgr && g_lua_mgr->guns().size() > 1) {
-            auto gd = g_lua_mgr->guns()[1];
-            auto gv = state.guns.spawn_from_def(gd);
-            int sid = -1;
-            if (g_sprite_ids) {
-                if (!gd.sprite.empty() && gd.sprite.find(':') != std::string::npos)
-                    sid = g_sprite_ids->try_get(gd.sprite);
-            }
-            if (gv)
-                state.ground_guns.spawn(*gv, place({0.0f, 2.0f}), sid);
-        }
-        // TEMP: spawn player with three shotguns for testing
-        if (g_lua_mgr && state.player_vid) {
-            Entity* p = state.entities.get_mut(*state.player_vid);
-            auto add_gun_to_inv = [&](int gun_type) {
-                for (auto const& g : g_lua_mgr->guns()) {
-                    if (g.type == gun_type) {
-                        if (auto gv = state.guns.spawn_from_def(g)) {
-                            state.inventory.insert_existing(INV_GUN, *gv);
-                            return *gv;
-                        }
-                    }
-                }
-                return VID{};
-            };
-            VID v1{}, v2{}, v3{};
-            v1 = add_gun_to_inv(210);
-            v2 = add_gun_to_inv(211);
-            v3 = add_gun_to_inv(212);
-            if (v1.id || v2.id || v3.id) {
-                // Equip the pump if available
-                if (v1.id) p->equipped_gun_vid = v1;
-                else if (v2.id) p->equipped_gun_vid = v2;
-                else if (v3.id) p->equipped_gun_vid = v3;
-            }
-        }
-        // Let Lua generate room content (crates, loot, etc.) if function is present
-        if (g_lua_mgr)
-            g_lua_mgr->call_generate_room(state);
-    }
-}
-static bool tile_blocks_entity(const State& state, int x, int y) {
-    return !state.stage.in_bounds(x, y) || state.stage.at(x, y).blocks_entities();
-}
-
-static glm::ivec2 nearest_walkable_tile(const State& state, glm::ivec2 t, int max_radius = 8) {
-    if (!tile_blocks_entity(state, t.x, t.y))
-        return t;
-    for (int r = 1; r <= max_radius; ++r) {
-        for (int dy = -r; dy <= r; ++dy) {
-            int y = t.y + dy;
-            int dx = r - std::abs(dy);
-            for (int sx : {-dx, dx}) {
-                int x = t.x + sx;
-                if (!tile_blocks_entity(state, x, y))
-                    return {x, y};
-            }
-        }
-    }
-    return t;
-}
-
-                        // stray global insertion removed
-static glm::vec2 ensure_not_in_block(const State& state, glm::vec2 pos) {
-    glm::ivec2 t{(int)std::floor(pos.x), (int)std::floor(pos.y)};
-    glm::ivec2 w = nearest_walkable_tile(state, t, 16);
-    if (w != t)
-        return glm::vec2{(float)w.x + 0.5f, (float)w.y + 0.5f};
-    return pos;
-}
+// generate_room and spawn-safety helpers moved to room.cpp

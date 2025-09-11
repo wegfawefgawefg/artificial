@@ -24,7 +24,7 @@ Build + Run
 
 Project Structure (flat under src/)
 -----------------------------------
-- main.cpp: SDL2 window + main loop, fixed 60Hz update, rendering.
+- main.cpp: SDL2 window + main loop, fixed 60Hz update. Delegates to render/sim modules.
 - types.hpp: Integer IDs (modes, types) + VID {id, version}.
 - settings.hpp: Engine constants (timestep, maxima, debounce).
 - graphics.hpp: Minimal camera structs, TILE_SIZE.
@@ -41,14 +41,14 @@ Project Structure (flat under src/)
 Current Behavior
 ----------------
 - Window: centered, resizable, “always on top/utility” hint.
-- Rendering: tiles; entities/pickups/items/guns render with sprites if available (SDL2_image textures) with AABB overlays for debug.
+- Rendering (render.cpp): world (tiles/entities/pickups/items/guns), HUD (reticle with spread circle; mag/reserve bars incl. Active Reload window; bottom shield/plates/HP/dash bars; NPC HP/shield/plates always on), panels (inventory list with DnD, character slide-out [C], equipped gun panel [V], ground inspect when overlapping [V]), and pages (Score Review with animated counters + click sounds; Next Stage page). AABB overlays remain for debug when sprites are missing.
 - Stage: blocking border + sprinkled obstacles; spawn safety nudges spawns to nearest walkable tile; ground items gently repel.
 - Entities: ~25 NPCs spawn and wander; player + NPC sprites if found under mods/base/graphics/.
 - Projectiles: Left click fires toward mouse; per‑object physics_steps=2; NPCs can die and drop powerups/items/guns via Lua‑defined weighted tables.
-- Input remap: Reads config/input.ini (key=value). Pickup key default is F (legacy E still works).
+- Input remap: Reads config/input.ini (key=value). Pickup key default is F.
 - UI: Pickup prompt when overlapping; inventory panel with hotkeys 1–0 and drag‑and‑drop reordering; basic gun equip/use logic.
 - Ammo system: Guns declare `compatible_ammo` (weighted). Ammo is chosen at gun spawn (or set via API). Ammo provides projectile sprite/size/speed and damage behavior: damage_mult, armor_pen (entities only), shield_mult, range + linear falloff, and entity pierce_count. Ammo hooks fire on hit events.
-- Right gun panel (toggle with V): full gun + ammo stats (2‑dec formatted) and sprites.
+- Right gun panel (toggle with V): full gun + ammo stats and sprite.
 - Center hover panel: hovering an inventory slot after a short delay (~0.12s) shows detailed info. If standing on a ground item/gun and V is ON, shows that target’s inspect panel too.
 
 Physics and Collisions
@@ -102,7 +102,7 @@ Coding Conventions / Guidelines
 
 Where To Add Things
 -------------------
-- Movement/collision logic: src/main.cpp (simulation block) or small helpers.
+- Simulation: moved into `sim.cpp` helpers called from the fixed-step loop (movement/collision; shield regen + reloads; drop mode toggle; number-row equip/select; ground repulsion; crate open; projectile step).
 - New entity/projectile fields: entity.hpp / projectiles.hpp.
 - Spawn/iterate: entities.cpp pool; main loop drives logic.
 - Keyboard remaps: tokens in config.cpp; use InputBindings.

@@ -74,6 +74,16 @@ What’s next
 - You can now drop in engine sources under `src/`.
 - We’ll wire in Lua FFI and data-driven tables once the base is compiling and the window loop runs.
 
+Source layout (engine)
+----------------------
+
+- `src/main.cpp`: App entry; window + main loop, input build, fixed 60 Hz sim tick, page mode transitions. Delegates to `render_frame(...)` and `sim_*` helpers.
+- `src/render.hpp/cpp`: All rendering, including world (tiles/entities/pickups/items/guns), HUD (reticle, bars, inventory), panels (character, equipped gun, ground inspect), and pages (Score Review with animated metrics + sounds, Next Stage page). Call: `render_frame(window, renderer, textures, ui_font, state, gfx, dt_sec, binds, projectiles, sounds)`.
+- `src/sim.hpp/cpp`: Simulation helpers called from the fixed-step loop: movement/collision, shield regen + reloads, drop mode, number-row inventory handling (equip/select), ground repulsion, crate open progress, projectile stepping.
+- `src/room.hpp/cpp`: Room generation and spawn helpers.
+- `src/luamgr.*`: Lua content registration and calls.
+- `src/*`: Remaining modules for inputs, textures, sprites, config, etc.
+
 Mods and hot reload
 -------------------
 
