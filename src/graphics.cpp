@@ -1,9 +1,57 @@
 #include "graphics.hpp"
-#include "app.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <string>
+
+bool init_font(Graphics& gfx, const char* fonts_dir, int pt_size) {
+    if (gfx.ui_font)
+        return true;
+    if (!TTF_WasInit()) {
+        if (TTF_Init() != 0) {
+            std::fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
+            return false;
+        }
+    }
+    std::string font_path;
+    std::error_code ec;
+    std::filesystem::path fdir = std::filesystem::path(fonts_dir);
+    if (std::filesystem::exists(fdir, ec) && std::filesystem::is_directory(fdir, ec)) {
+        for (auto const& de : std::filesystem::directory_iterator(fdir, ec)) {
+            if (ec) { ec.clear(); continue; }
+            if (!de.is_regular_file()) continue;
+            auto p = de.path();
+            auto ext = p.extension().string();
+            for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+            if (ext == ".ttf") { font_path = p.string(); break; }
+        }
+    }
+    if (!font_path.empty()) {
+        gfx.ui_font = TTF_OpenFont(font_path.c_str(), pt_size);
+        if (!gfx.ui_font) {
+            std::fprintf(stderr, "TTF_OpenFont failed: %s\n", TTF_GetError());
+            return false;
+        }
+        return true;
+    } else {
+        std::fprintf(stderr, "No .ttf found in %s. Numeric countdown will be hidden.\n", fonts_dir);
+        return false;
+    }
+}
+
+bool try_init_video_with_driver(const char* driver) {
+    if (driver) {
+        setenv("SDL_VIDEODRIVER", driver, 1);
+    }
+    if (SDL_Init(SDL_INIT_VIDEO) == 0)
+        return true;
+    const char* err = SDL_GetError();
+    std::fprintf(stderr, "SDL_Init failed (driver=%s): %s\n", driver ? driver : "auto",
+                 (err && *err) ? err : "(no error text)");
+    return false;
+}
 
 bool init_graphics(Graphics& gfx, bool headless, const char* title, int width, int height) {
     gfx.window = nullptr;
@@ -61,10 +109,16 @@ bool init_graphics(Graphics& gfx, bool headless, const char* title, int width, i
     if (!gfx.renderer)
         return false;
 
+    const char* active_driver = SDL_GetCurrentVideoDriver();
+    std::printf("SDL video driver: %s\n", active_driver ? active_driver : "(none)");
+
+    // Initialize default UI font (optional)
+    (void)init_font(gfx);
     return true;
 }
 
 void shutdown_graphics(Graphics& gfx) {
+    if (gfx.ui_font) { TTF_CloseFont(gfx.ui_font); gfx.ui_font = nullptr; }
     if (gfx.renderer) {
         SDL_DestroyRenderer(gfx.renderer);
         gfx.renderer = nullptr;
@@ -73,4 +127,5 @@ void shutdown_graphics(Graphics& gfx) {
         SDL_DestroyWindow(gfx.window);
         gfx.window = nullptr;
     }
+    if (TTF_WasInit()) TTF_Quit();
 }

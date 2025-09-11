@@ -5,29 +5,28 @@
 #include "state.hpp"
 
 // Pre-physics ticking for guns/items (Lua-driven).
-void sim_pre_physics_ticks(State& state);
+void sim_pre_physics_ticks();
 
 // Player/NPC movement, dash, per-axis tile collision, movement spread.
-void sim_move_and_collide(State& state, Graphics& gfx);
+void sim_move_and_collide(Graphics& gfx);
 
 // Shield regen and active reload progress/completion on equipped gun.
-void sim_shield_and_reload(State& state);
+void sim_shield_and_reload();
 
 // Toggle drop mode (Q edge).
-void sim_toggle_drop_mode(State& state);
+void sim_toggle_drop_mode();
 
 // Number row actions: select, use, or drop items/guns.
-void sim_inventory_number_row(State& state);
+void sim_inventory_number_row();
 
 // Gentle separation between overlapping ground items/guns.
-void sim_ground_repulsion(State& state);
+void sim_ground_repulsion();
 
 // Update crate open progress when player overlaps; handle opening and drops.
-void sim_update_crates_open(State& state);
+void sim_update_crates_open();
 
 // Step projectiles and resolve hits (damage, drops, metrics).
-void sim_step_projectiles(State& state, Projectiles& projectiles);
+void sim_step_projectiles(Projectiles& projectiles);
 
 // Manual pickup handling (F key) for best-overlap ground item/gun with sounds and metrics.
-struct SoundStore;
-void sim_handle_pickups(State& state, SoundStore& sounds);
+void sim_handle_pickups();

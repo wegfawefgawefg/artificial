@@ -1,7 +1,7 @@
 #include "config.hpp"
 #include "graphics.hpp"
-#include "app.hpp"
 #include "render.hpp"
+#include "runtime_settings.hpp"
 #include "sim.hpp"
 #include "globals.hpp"
 #include "input_system.hpp"
@@ -10,6 +10,7 @@
 #include "projectiles.hpp"
 #include "settings.hpp"
 #include "sound.hpp"
+#include "audio.hpp"
 #include "sprites.hpp"
 #include "state.hpp"
 #include "tex.hpp"
@@ -53,6 +54,7 @@ int main(int argc, char** argv) {
     // Non-SDL path: only scan and build sprite data, then exit.
     if (arg_scan_sprites) {
         ModsManager mods{"mods"};
+        g_mods = &mods;
         mods.discover_mods();
         SpriteIdRegistry sprites{};
         mods.build_sprite_registry(sprites);
@@ -80,78 +82,38 @@ int main(int argc, char** argv) {
         SDL_Quit();
         return 1;
     }
-    SDL_Window* window = gfx.window;
-    SDL_Renderer* renderer = gfx.renderer;
 
     const char* active_driver = SDL_GetCurrentVideoDriver();
     std::printf("SDL video driver: %s\n", active_driver ? active_driver : "(none)");
 
-    // quick GLM sanity check
-    glm::vec3 a(1.0f, 2.0f, 3.0f);
-    glm::vec3 b(4.0f, 5.0f, 6.0f);
-    float dot = glm::dot(a, b);
-    std::printf("glm dot(a,b) = %f\n", static_cast<double>(dot));
-
     // Engine state/graphics
     State state{};
+    g_state = &state;
     state.mode = ids::MODE_PLAYING;
 
-    // Text rendering setup (SDL_ttf)
-    TTF_Font* ui_font = nullptr;
-    if (TTF_Init() == 0) {
-        // Pick first .ttf in fonts/
-        std::string font_path;
-        std::error_code ec;
-        std::filesystem::path fdir = std::filesystem::path("fonts");
-        if (std::filesystem::exists(fdir, ec) && std::filesystem::is_directory(fdir, ec)) {
-            for (auto const& de : std::filesystem::directory_iterator(fdir, ec)) {
-                if (ec) {
-                    ec.clear();
-                    continue;
-                }
-                if (!de.is_regular_file())
-                    continue;
-                auto p = de.path();
-                auto ext = p.extension().string();
-                for (auto& c : ext)
-                    c = (char)std::tolower((unsigned char)c);
-                if (ext == ".ttf") {
-                    font_path = p.string();
-                    break;
-                }
-            }
-        }
-        if (!font_path.empty()) {
-            ui_font = TTF_OpenFont(font_path.c_str(), 20);
-            if (!ui_font) {
-                std::fprintf(stderr, "TTF_OpenFont failed: %s\n", TTF_GetError());
-            }
-        } else {
-            std::fprintf(stderr, "No .ttf found in fonts/. Numeric countdown will be hidden.\n");
-        }
-    } else {
-        std::fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
-    }
-
     // Audio (SDL_mixer)
-    SoundStore sounds;
-    if (!sounds.init()) {
+    Audio audio;
+    g_audio = &audio;
+    if (!audio.init()) {
         std::fprintf(stderr, "[audio] SDL_mixer init failed: %s\n", Mix_GetError());
     }
 
     // Mods and sprite registry/store
     ModsManager mods{"mods"};
+    g_mods = &mods;
     mods.discover_mods();
     SpriteIdRegistry sprites{};
     mods.build_sprite_registry(sprites);
     SpriteStore sprite_store{};
-    mods.build_sprite_store(sprite_store);
+    g_sprite_store = &sprite_store;
+    mods.build_sprite_store(*g_sprite_store);
     // Resolve sprite IDs for known entities/items later
     g_sprite_ids = &sprites;
     // Load textures for sprites
     TextureStore textures;
-    if (!arg_headless && renderer)
-    textures.load_all(renderer, sprite_store);
+    g_textures = &textures;
+    if (!arg_headless && gfx.renderer)
+        g_textures->load_all(gfx.renderer, *g_sprite_store);
     // Load sounds from mods/*/sounds/*.wav|*.ogg with key "mod:stem"
     {
         std::error_code ec;
@@ -181,7 +143,7 @@ int main(int argc, char** argv) {
                         if (ext == ".wav" || ext == ".ogg") {
                             std::string stem = p.stem().string();
                             std::string key = modname + ":" + stem;
-                            (void)sounds.load_file(key, p.string());
+                            (void)audio.sounds.load_file(key, p.string());
                         }
                     }
                 }
@@ -199,17 +161,21 @@ int main(int argc, char** argv) {
     g_lua_mgr = &lua;
 
     // Prepare projectiles then generate initial room
+    RuntimeSettings settings{};
+    g_settings = &settings;
     Projectiles projectiles{};
-    generate_room(state, projectiles, renderer, gfx);
+    generate_room(projectiles, gfx);
 
     bool running = true;
     InputBindings binds{};
+    g_binds = &binds;
     if (auto loaded = load_input_bindings_from_ini("config/input.ini")) {
         binds = *loaded;
     }
     // projectiles already declared above
     state.gun_cooldown = 0.0f;
     InputContext ictx{};
+    g_input = &ictx;
     // FPS counter state
     Uint64 perf_freq = SDL_GetPerformanceFrequency();
     Uint64 t_last = SDL_GetPerformanceCounter();
@@ -224,7 +190,7 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE)
                 request_quit = true;
-            process_events(ev, ictx, state, request_quit);
+            process_events(ev, ictx, request_quit);
             if (ev.type == SDL_QUIT)
                 request_quit = true;
         }
@@ -233,7 +199,7 @@ int main(int argc, char** argv) {
         double dt_sec = static_cast<double>(t_now - t_last) / static_cast<double>(perf_freq);
         t_last = t_now;
 
-        build_inputs(binds, ictx, state, gfx, static_cast<float>(dt_sec));
+        build_inputs(binds, ictx, gfx, static_cast<float>(dt_sec));
         // Age alerts and purge expired
         for (auto& al : state.alerts) {
             al.age += static_cast<float>(dt_sec);
@@ -246,7 +212,7 @@ int main(int argc, char** argv) {
                            state.alerts.end());
         // Hot reload poll (assets + behaviors stubs)
         mods.poll_hot_reload(sprites, dt_sec);
-        mods.poll_hot_reload(sprite_store, dt_sec);
+        if (g_sprite_store) mods.poll_hot_reload(*g_sprite_store, dt_sec);
 
         if (request_quit)
             running = false;
@@ -257,14 +223,14 @@ int main(int argc, char** argv) {
             state.time_since_last_update -= TIMESTEP;
 
             // Before-physics ticking (opt-in)
-            sim_pre_physics_ticks(state);
+            sim_pre_physics_ticks();
 
             // Movement + physics: player controlled + NPC wander; keep inside non-block tiles
-            sim_move_and_collide(state, gfx);
+            sim_move_and_collide(gfx);
 
             // Shield regeneration after delay (3s no damage), global step, and active reload
             // progress/completion
-            sim_shield_and_reload(state);
+            sim_shield_and_reload();
 
                     // Auto-pickup powerups on overlap
                     if (state.mode == ids::MODE_PLAYING && state.player_vid) {
@@ -294,16 +260,16 @@ int main(int argc, char** argv) {
 
             // Item pickup with F key; ground guns equip or add to inventory as VIDs
             if (state.mode == ids::MODE_PLAYING && state.player_vid) {
-                sim_handle_pickups(state, sounds);
+                sim_handle_pickups();
                 // Simple separation to avoid intersecting ground items/guns
-                sim_ground_repulsion(state);
+                sim_ground_repulsion();
             }
 
             // Toggle drop mode on Q edge
-            sim_toggle_drop_mode(state);
+            sim_toggle_drop_mode();
 
             // Number keys: either drop from slot (if in drop mode) or select/use/equip
-            sim_inventory_number_row(state);
+            sim_inventory_number_row();
 
             // Accumulate time-in-stage metrics
             if (state.mode == ids::MODE_PLAYING) {
@@ -332,11 +298,11 @@ int main(int argc, char** argv) {
                     bool overlaps = !(right <= exl || left >= exr || bottom <= ext || top >= exb);
                     if (overlaps) {
                         if (state.exit_countdown < 0.0f) {
-                            state.exit_countdown = EXIT_COUNTDOWN_SECONDS;
+                            state.exit_countdown = g_settings ? g_settings->exit_countdown_seconds : EXIT_COUNTDOWN_SECONDS;
                             state.alerts.push_back(
                                 {"Exit reached: hold to leave", 0.0f, 2.0f, false});
                             std::printf("[room] Exit reached, starting %.1fs countdown...\n",
-                                        (double)EXIT_COUNTDOWN_SECONDS);
+                                        (double)(g_settings ? g_settings->exit_countdown_seconds : EXIT_COUNTDOWN_SECONDS));
                         }
                     } else {
                         // Reset countdown if player leaves tile
@@ -457,7 +423,7 @@ int main(int argc, char** argv) {
                 const Entity* p = state.entities.get(*state.player_vid);
                 if (p) {
                     int ww = width, wh = height;
-                    if (renderer) SDL_GetRendererOutputSize(renderer, &ww, &wh);
+                    if (gfx.renderer) SDL_GetRendererOutputSize(gfx.renderer, &ww, &wh);
                     float zx = gfx.play_cam.zoom;
                     float sx = static_cast<float>(state.mouse_inputs.pos.x);
                     float sy = static_cast<float>(state.mouse_inputs.pos.y);
@@ -471,7 +437,8 @@ int main(int argc, char** argv) {
 
                     glm::vec2 target = p->pos;
                     if (state.camera_follow_enabled) {
-                        target = p->pos + (mouse_world - p->pos) * CAMERA_FOLLOW_FACTOR;
+                        float cff = g_settings ? g_settings->camera_follow_factor : CAMERA_FOLLOW_FACTOR;
+                        target = p->pos + (mouse_world - p->pos) * cff;
                     }
                     gfx.play_cam.pos = target;
                 }
@@ -498,7 +465,7 @@ int main(int argc, char** argv) {
                             if (gim->jammed) {
                                 state.alerts.push_back({"Gun jammed! Mash SPACE", 0.0f, 1.2f, false});
                                 // Gentle feedback sound when trying to reload while jammed
-                                sounds.play("base:ui_cant");
+                                if (g_audio) g_audio->sounds.play("base:ui_cant");
                             } else if (gd) {
                                 if (gim->reloading) {
                                     // Active reload attempt
@@ -519,7 +486,7 @@ int main(int argc, char** argv) {
                                         state.alerts.push_back(
                                             {"Active Reload!", 0.0f, 1.2f, false});
                                         state.reticle_shake = std::max(state.reticle_shake, 6.0f);
-                                        sounds.play("base:ui_super_confirm");
+                                        if (g_audio) g_audio->sounds.play("base:ui_super_confirm");
                                         // Metrics
                                         if (state.player_vid) {
                                             if (auto* pm = state.metrics_for(*state.player_vid))
@@ -625,7 +592,7 @@ int main(int argc, char** argv) {
                                     gim->ar_window_end = start + size;
                                     gim->ar_consumed = false;
                                     gim->ar_failed_attempt = false;
-                                    sounds.play(gd->sound_reload.empty() ? "base:reload"
+                                    if (g_audio) g_audio->sounds.play(gd->sound_reload.empty() ? "base:reload"
                                                                          : gd->sound_reload);
                                 } else {
                                     state.alerts.push_back(
@@ -703,7 +670,7 @@ int main(int argc, char** argv) {
                                                            (float)state.stage.get_height() / 2.0f};
                 // convert mouse to world
                 int ww = width, wh = height;
-                if (renderer) SDL_GetRendererOutputSize(renderer, &ww, &wh);
+                if (gfx.renderer) SDL_GetRendererOutputSize(gfx.renderer, &ww, &wh);
                 float inv_scale = 1.0f / (TILE_SIZE * gfx.play_cam.zoom);
                 glm::vec2 m = {gfx.play_cam.pos.x + (static_cast<float>(state.mouse_inputs.pos.x) -
                                                      static_cast<float>(ww) * 0.5f) *
@@ -801,7 +768,7 @@ int main(int argc, char** argv) {
                                     fired = false;
                             if (g_lua_mgr)
                                 g_lua_mgr->call_gun_on_jam(gim->def_type, state, *plm);
-                            sounds.play(gd->sound_jam.empty() ? "base:ui_cant"
+                            if (g_audio) g_audio->sounds.play(gd->sound_jam.empty() ? "base:ui_cant"
                                                                       : gd->sound_jam);
                             state.alerts.push_back(
                                 {"Gun jammed! Mash SPACE", 0.0f, 2.0f, false});
@@ -923,13 +890,13 @@ int main(int argc, char** argv) {
                                         break;
                                     }
                             }
-                            sounds.play((gd && !gd->sound_fire.empty()) ? gd->sound_fire
+                            if (g_audio) g_audio->sounds.play((gd && !gd->sound_fire.empty()) ? gd->sound_fire
                                                                         : "base:small_shoot");
                         } else {
-                            sounds.play("base:small_shoot");
+                            if (g_audio) g_audio->sounds.play("base:small_shoot");
                         }
                     } else {
-                        sounds.play("base:small_shoot");
+                        if (g_audio) g_audio->sounds.play("base:small_shoot");
                     }
                     // on_shoot triggers for items in inventory
                     if (g_lua_mgr && state.player_vid) {
@@ -1035,7 +1002,7 @@ int main(int argc, char** argv) {
                                     gim->ar_consumed = false;
                                     state.alerts.push_back(
                                         {"Unjammed: Reloading...", 0.0f, 1.0f, false});
-                                    sounds.play("base:unjam");
+                                    if (g_audio) g_audio->sounds.play("base:unjam");
                                 } else {
                                     state.alerts.push_back(
                                         {"Unjammed: NO AMMO", 0.0f, 1.5f, false});
@@ -1047,7 +1014,7 @@ int main(int argc, char** argv) {
             }
 
             // step projectiles with on-hit applying damage and drops
-            sim_step_projectiles(state, projectiles);
+            sim_step_projectiles(projectiles);
             
             // After-physics ticking (opt-in)
             if (state.player_vid && g_lua_mgr) {
@@ -1136,16 +1103,16 @@ int main(int argc, char** argv) {
                 std::printf("[room] Entering next area.\n");
                 state.alerts.push_back({"Entering next area", 0.0f, 2.0f, false});
                 state.mode = ids::MODE_PLAYING;
-                generate_room(state, projectiles, renderer, gfx);
+                generate_room(projectiles, gfx);
                 state.input_lockout_timer = 0.25f; // avoid firing immediately after click
             }
         }
         
         // Simulation-side crate progression
-        sim_update_crates_open(state);
+        sim_update_crates_open();
         // Render a full frame via renderer module (windowed mode only)
         if (!arg_headless)
-            render_frame(window, renderer, textures, ui_font, state, gfx, dt_sec, binds, projectiles, sounds);
+            render_frame(gfx, dt_sec, projectiles);
 
 
         // FPS calculation using high-resolution timer
@@ -1163,8 +1130,8 @@ int main(int argc, char** argv) {
             char tmp[32];
             std::snprintf(tmp, sizeof(tmp), "%d", last_fps);
             title_buf += tmp;
-            if (!arg_headless && window)
-                SDL_SetWindowTitle(window, title_buf.c_str());
+            if (!arg_headless && gfx.window)
+                SDL_SetWindowTitle(gfx.window, title_buf.c_str());
         }
 
         // Auto-exit after a fixed number of frames if requested.
@@ -1175,11 +1142,7 @@ int main(int argc, char** argv) {
     }
 
     shutdown_graphics(gfx);
-    if (ui_font)
-        TTF_CloseFont(ui_font);
-    sounds.shutdown();
-    if (TTF_WasInit())
-        TTF_Quit();
+    if (g_audio) g_audio->shutdown();
     SDL_Quit();
     return 0;
 }

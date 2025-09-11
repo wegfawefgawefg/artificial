@@ -1,6 +1,8 @@
 #include "render.hpp"
 
 #include "globals.hpp"
+#include "tex.hpp"
+#include "audio.hpp"
 #include "luamgr.hpp"
 #include "sprites.hpp"
 #include "settings.hpp"
@@ -40,16 +42,11 @@ static inline void ui_draw_kv_line(SDL_Renderer* renderer, TTF_Font* font,
 }
 }
 
-void render_frame(SDL_Window* window,
-                  SDL_Renderer* renderer,
-                  const TextureStore& textures,
-                  TTF_Font* ui_font,
-                  State& state,
-                  Graphics& gfx,
+void render_frame(Graphics& gfx,
                   double dt_sec,
-                  const InputBindings& binds,
-                  const Projectiles& projectiles,
-                  SoundStore& sounds) {
+                  const Projectiles& projectiles) {
+    auto& state = *g_state;
+    SDL_Renderer* renderer = gfx.renderer;
     if (!renderer) {
         SDL_Delay(16);
         return;
@@ -58,7 +55,7 @@ void render_frame(SDL_Window* window,
     int width = 0, height = 0;
     SDL_SetRenderDrawColor(renderer, 18, 18, 20, 255); // dark gray
     SDL_RenderClear(renderer);
-    (void)window;
+    // window is available via gfx.window if needed
 
     // One-frame warnings (e.g., missing sprites), rendered in red.
     std::vector<std::string> frame_warnings;
@@ -119,12 +116,12 @@ void render_frame(SDL_Window* window,
                 SDL_SetRenderDrawColor(renderer, 200, 160, 100, 255);
                 SDL_RenderDrawRect(renderer, &rc);
                 // label above
-                if (ui_font && g_lua_mgr) {
+                if (gfx.ui_font && g_lua_mgr) {
                     std::string label = "Crate";
                     if (auto const* cd = g_lua_mgr->find_crate(c.def_type))
                         label = cd->label.empty() ? cd->name : cd->label;
                     SDL_Color lc{240, 220, 80, 255};
-                    SDL_Surface* lsrf = TTF_RenderUTF8_Blended(ui_font, label.c_str(), lc);
+                    SDL_Surface* lsrf = TTF_RenderUTF8_Blended(gfx.ui_font, label.c_str(), lc);
                     if (lsrf) {
                         SDL_Texture* lt = SDL_CreateTextureFromSurface(renderer, lsrf);
                         int tw = 0, th = 0;
@@ -164,7 +161,7 @@ void render_frame(SDL_Window* window,
             // sprite if available
             bool drew_sprite = false;
             if (e.sprite_id >= 0) {
-                SDL_Texture* tex = textures.get(e.sprite_id);
+                SDL_Texture* tex = (g_textures ? g_textures->get(e.sprite_id) : nullptr);
                 if (tex) {
                     int tw = 0, th = 0;
                     SDL_QueryTexture(tex, nullptr, nullptr, &tw, &th);
@@ -230,7 +227,7 @@ void render_frame(SDL_Window* window,
                     float scale = TILE_SIZE * gfx.play_cam.zoom;
                     SDL_Rect r{(int)std::floor(c0.x), (int)std::floor(c0.y), (int)std::ceil(0.30f * scale), (int)std::ceil(0.20f * scale)};
                     if (gspr >= 0) {
-                        if (SDL_Texture* tex = textures.get(gspr))
+                        if (SDL_Texture* tex = (g_textures ? g_textures->get(gspr) : nullptr))
                             SDL_RenderCopyEx(renderer, tex, nullptr, &r, angle_deg, nullptr, SDL_FLIP_NONE);
                         else
                             add_warning("Missing texture for held gun sprite");
@@ -323,7 +320,7 @@ void render_frame(SDL_Window* window,
                         }
                 }
                 if (sid >= 0) {
-                    if (SDL_Texture* tex = textures.get(sid))
+                    if (SDL_Texture* tex = (g_textures ? g_textures->get(sid) : nullptr))
                         SDL_RenderCopy(renderer, tex, nullptr, &r);
                     else
                         add_warning("Missing texture for powerup sprite");
@@ -370,7 +367,7 @@ void render_frame(SDL_Window* window,
                 }
             }
             if (ispr >= 0) {
-                if (SDL_Texture* tex = textures.get(ispr))
+                if (SDL_Texture* tex = (g_textures ? g_textures->get(ispr) : nullptr))
                     SDL_RenderCopy(renderer, tex, nullptr, &r);
             } else {
                 add_warning("Missing sprite for item");
@@ -403,7 +400,7 @@ void render_frame(SDL_Window* window,
                 }
             }
             if (sid >= 0) {
-                if (SDL_Texture* tex = textures.get(sid))
+                if (SDL_Texture* tex = (g_textures ? g_textures->get(sid) : nullptr))
                     SDL_RenderCopy(renderer, tex, nullptr, &r);
                 else
                     add_warning("Missing texture for gun sprite");
@@ -421,7 +418,7 @@ void render_frame(SDL_Window* window,
             }
         }
         // Consolidated pickup prompt
-        if (pdraw && ui_font && state.mode == ids::MODE_PLAYING && best_area > 0.0f) {
+        if (pdraw && gfx.ui_font && state.mode == ids::MODE_PLAYING && best_area > 0.0f) {
             std::string nm;
             SDL_Rect r{0, 0, 0, 0};
             if (best_kind == PK::Item) {
@@ -452,11 +449,12 @@ void render_frame(SDL_Window* window,
             }
             SDL_SetRenderDrawColor(renderer, 240, 220, 80, 255);
             SDL_RenderDrawRect(renderer, &r);
-            const char* keyname = SDL_GetScancodeName(binds.pick_up);
+            const char* keyname = nullptr;
+            if (g_binds) keyname = SDL_GetScancodeName(g_binds->pick_up);
             if (!keyname || !*keyname) keyname = "F";
             std::string prompt = std::string("Press ") + keyname + " to pick up " + nm;
             SDL_Color col{250, 250, 250, 255};
-            SDL_Surface* s = TTF_RenderUTF8_Blended(ui_font, prompt.c_str(), col);
+            SDL_Surface* s = TTF_RenderUTF8_Blended(gfx.ui_font, prompt.c_str(), col);
             if (s) {
                 SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s);
                 int tw = 0, th = 0;
@@ -492,10 +490,10 @@ void render_frame(SDL_Window* window,
                                 sid = g_sprite_ids->try_get(ddf.sprite);
                             break; }
                     }
-                    if (sid >= 0) if (SDL_Texture* texi = textures.get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, texi, nullptr, &dst); ty += 36; }
-                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Item", iname);
-                    if (!idesc.empty()) ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Desc", idesc);
-                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Consumable", consume ? std::string("Yes") : std::string("No"));
+                    if (sid >= 0 && g_textures) if (SDL_Texture* texi = g_textures->get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, texi, nullptr, &dst); ty += 36; }
+                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Item", iname);
+                    if (!idesc.empty()) ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Desc", idesc);
+                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Consumable", consume ? std::string("Yes") : std::string("No"));
                 } else if (best_kind == PK::Gun) {
                     auto const& gg = state.ground_guns.data()[best_idx];
                     const GunInstance* gim = state.guns.get(gg.gun_vid);
@@ -503,36 +501,36 @@ void render_frame(SDL_Window* window,
                     if (g_lua_mgr && gim) { for (auto const& gdf : g_lua_mgr->guns()) if (gdf.type == gim->def_type) { gdp = &gdf; break; } }
                     if (gdp) {
                         int gun_sid = -1; if (!gdp->sprite.empty() && g_sprite_ids) gun_sid = g_sprite_ids->try_get(gdp->sprite);
-                        if (gun_sid >= 0) if (SDL_Texture* texg = textures.get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, texg, nullptr, &dst); ty += 44; }
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Gun", gdp->name);
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Damage", std::to_string((int)std::lround(gdp->damage)));
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "RPM", std::to_string((int)std::lround(gdp->rpm)));
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Deviation", fmt2(gdp->deviation) + " deg");
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Pellets", std::to_string(gdp->pellets_per_shot));
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Recoil", fmt2(gdp->recoil));
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Control", fmt2(gdp->control));
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gdp->max_recoil_spread_deg)) + " deg");
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Reload/Eject", std::to_string((int)std::lround(gdp->reload_time * 1000.0f)) + "/" + std::to_string((int)std::lround(gdp->eject_time * 1000.0f)) + " ms");
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Jam", std::to_string((int)std::lround(gdp->jam_chance * 100.0f)) + " %");
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AR Center", fmt2(gdp->ar_pos) + " ±" + fmt2(gdp->ar_pos_variance));
-                        ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AR Size", fmt2(gdp->ar_size) + " ±" + fmt2(gdp->ar_size_variance));
+                        if (gun_sid >= 0 && g_textures) if (SDL_Texture* texg = g_textures->get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, texg, nullptr, &dst); ty += 44; }
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Gun", gdp->name);
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Damage", std::to_string((int)std::lround(gdp->damage)));
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "RPM", std::to_string((int)std::lround(gdp->rpm)));
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Deviation", fmt2(gdp->deviation) + " deg");
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Pellets", std::to_string(gdp->pellets_per_shot));
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Recoil", fmt2(gdp->recoil));
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Control", fmt2(gdp->control));
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gdp->max_recoil_spread_deg)) + " deg");
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Reload/Eject", std::to_string((int)std::lround(gdp->reload_time * 1000.0f)) + "/" + std::to_string((int)std::lround(gdp->eject_time * 1000.0f)) + " ms");
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Jam", std::to_string((int)std::lround(gdp->jam_chance * 100.0f)) + " %");
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AR Center", fmt2(gdp->ar_pos) + " ±" + fmt2(gdp->ar_pos_variance));
+                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AR Size", fmt2(gdp->ar_size) + " ±" + fmt2(gdp->ar_size_variance));
                         if (gim && gim->ammo_type != 0) {
                             if (auto const* ad = g_lua_mgr->find_ammo(gim->ammo_type)) {
                                 int asid = (!ad->sprite.empty() && g_sprite_ids) ? g_sprite_ids->try_get(ad->sprite) : -1;
-                                if (asid >= 0) if (SDL_Texture* tex = textures.get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
+                                if (asid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
                                 int apct = (int)std::lround(ad->armor_pen * 100.0f);
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Ammo", ad->name);
-                                if (!ad->desc.empty()) ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Desc", ad->desc);
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "DMG", fmt2(ad->damage_mult));
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AP", std::to_string(apct) + "%");
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Shield", fmt2(ad->shield_mult));
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Ammo", ad->name);
+                                if (!ad->desc.empty()) ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Desc", ad->desc);
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "DMG", fmt2(ad->damage_mult));
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AP", std::to_string(apct) + "%");
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Shield", fmt2(ad->shield_mult));
                                 if (ad->range_units > 0.0f) {
-                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
-                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
-                                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
+                                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
+                                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
+                                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
                                 }
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
                             }
                         }
                     }
@@ -550,11 +548,12 @@ void render_frame(SDL_Window* window,
                        (int)std::ceil(proj.size.x * scale), (int)std::ceil(proj.size.y * scale)};
             bool drew = false;
             if (proj.sprite_id >= 0) {
-                if (SDL_Texture* tex = textures.get(proj.sprite_id)) {
+                if (g_textures) { if (SDL_Texture* tex = g_textures->get(proj.sprite_id)) {
                     SDL_RenderCopy(renderer, tex, nullptr, &r);
                     drew = true;
                 } else {
                     add_warning("Missing texture for projectile sprite");
+                }
                 }
             }
             if (!drew) {
@@ -657,11 +656,11 @@ void render_frame(SDL_Window* window,
                             SDL_Rect rf{rx + bar_w + gap, ry + (bar_h - rfill), 3, rfill}; SDL_SetRenderDrawColor(renderer, 180, 200, 200, 220); SDL_RenderFillRect(renderer, &rf);
                         }
                         // Text label and jam progress
-                        if (ui_font) {
+                        if (gfx.ui_font) {
                             const char* txt = nullptr; SDL_Color col{250,220,80,255};
                             if (gi->jammed) { txt = "JAMMED!"; col = SDL_Color{240,80,80,255}; }
                             else if (gi->current_mag == 0) { txt = (gi->ammo_reserve > 0) ? "RELOAD" : "NO AMMO"; col = SDL_Color{250,220,80,255}; }
-                            if (txt) { if (SDL_Surface* s = TTF_RenderUTF8_Blended(ui_font, txt, col)) { SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{rx - 4, ry - th - 4, tw, th}; SDL_RenderCopy(renderer, t, nullptr, &d); SDL_DestroyTexture(t); SDL_FreeSurface(s);} }
+                            if (txt) { if (SDL_Surface* s = TTF_RenderUTF8_Blended(gfx.ui_font, txt, col)) { SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{rx - 4, ry - th - 4, tw, th}; SDL_RenderCopy(renderer, t, nullptr, &d); SDL_DestroyTexture(t); SDL_FreeSurface(s);} }
                         }
                         if (gi->jammed) { SDL_Rect jb{rx - 12, ry, 4, bar_h}; SDL_SetRenderDrawColor(renderer, 50, 30, 30, 200); SDL_RenderFillRect(renderer, &jb); int jh = (int)std::lround((double)bar_h * (double)gi->unjam_progress); SDL_Rect jf{rx - 12, ry + (bar_h - jh), 4, jh}; SDL_SetRenderDrawColor(renderer, 240, 60, 60, 240); SDL_RenderFillRect(renderer, &jf); }
                     }
@@ -675,7 +674,7 @@ void render_frame(SDL_Window* window,
         float target = state.show_character_panel ? 1.0f : 0.0f;
         state.character_panel_slide = state.character_panel_slide + (target - state.character_panel_slide) * (float)std::clamp(6.0 * dt_sec, 0.0, 1.0);
         // Render when slightly open to avoid flicker
-        if (state.character_panel_slide > 0.02f && ui_font) {
+        if (state.character_panel_slide > 0.02f && gfx.ui_font) {
             int ww = 0, wh = 0; SDL_GetRendererOutputSize(renderer, &ww, &wh);
             int panel_w = (int)std::lround(ww * 0.28);
             int px = (int)std::lround((-panel_w + 16) * (double)(1.0f - state.character_panel_slide));
@@ -686,8 +685,8 @@ void render_frame(SDL_Window* window,
             int tx = px + 12; int ty = py + 12; int lh = 18;
             auto draw_line = [&](const char* key, float val, const char* suffix){
                 char buf[64]; std::snprintf(buf, sizeof(buf), "%s: %.2f%s", key, (double)val, suffix);
-                SDL_Color c{220,220,220,255};
-                if (SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, buf, c)) { SDL_Texture* t=SDL_CreateTextureFromSurface(renderer,srf); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{tx,ty,tw,th}; SDL_RenderCopy(renderer,t,nullptr,&d); SDL_DestroyTexture(t); SDL_FreeSurface(srf);} ty += lh;
+                SDL_Color col{220,220,220,255};
+                if (SDL_Surface* srf = TTF_RenderUTF8_Blended(gfx.ui_font, buf, col)) { SDL_Texture* t=SDL_CreateTextureFromSurface(renderer,srf); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{tx,ty,tw,th}; SDL_RenderCopy(renderer,t,nullptr,&d); SDL_DestroyTexture(t); SDL_FreeSurface(srf);} ty += lh;
             };
             const Entity* p = (state.player_vid ? state.entities.get(*state.player_vid) : nullptr);
             if (p) {
@@ -715,7 +714,7 @@ void render_frame(SDL_Window* window,
     }
 
     // Inventory list (left column) – gameplay only, hidden if character panel shown
-    if (ui_font && state.mode == ids::MODE_PLAYING && !state.show_character_panel) {
+    if (gfx.ui_font && state.mode == ids::MODE_PLAYING && !state.show_character_panel) {
         int sx = 40;
         int sy = 140;
         int slot_h = 26;
@@ -733,7 +732,7 @@ void render_frame(SDL_Window* window,
             char hk[4];
             std::snprintf(hk, sizeof(hk), "%d", (i == 9) ? 0 : (i + 1));
             SDL_Color hotc{150, 150, 150, 220};
-            if (SDL_Surface* hs = TTF_RenderUTF8_Blended(ui_font, hk, hotc)) {
+            if (SDL_Surface* hs = TTF_RenderUTF8_Blended(gfx.ui_font, hk, hotc)) {
                 SDL_Texture* ht = SDL_CreateTextureFromSurface(renderer, hs);
                 int tw = 0, th = 0; SDL_QueryTexture(ht, nullptr, nullptr, &tw, &th);
                 SDL_Rect d{slot.x - 20, slot.y + 2, tw, th}; SDL_RenderCopy(renderer, ht, nullptr, &d);
@@ -746,8 +745,8 @@ void render_frame(SDL_Window* window,
                 int icon_x = slot.x + 6, icon_y = slot.y + 3;
                 int label_x = slot.x + 8; int label_offset = 0;
                 auto draw_icon = [&](int sprite_id) {
-                    if (sprite_id >= 0) {
-                        if (SDL_Texture* tex = textures.get(sprite_id)) {
+                    if (sprite_id >= 0 && g_textures) {
+                        if (SDL_Texture* tex = g_textures->get(sprite_id)) {
                             SDL_Rect dst{icon_x, icon_y, icon_w, icon_h};
                             SDL_RenderCopy(renderer, tex, nullptr, &dst);
                             label_offset = icon_w + 10;
@@ -775,7 +774,7 @@ void render_frame(SDL_Window* window,
                 }
                 if (!label.empty()) {
                     SDL_Color tc{230, 230, 230, 255};
-                    if (SDL_Surface* ts = TTF_RenderUTF8_Blended(ui_font, label.c_str(), tc)) {
+                    if (SDL_Surface* ts = TTF_RenderUTF8_Blended(gfx.ui_font, label.c_str(), tc)) {
                         SDL_Texture* tt = SDL_CreateTextureFromSurface(renderer, ts);
                         int tw = 0, th = 0; SDL_QueryTexture(tt, nullptr, nullptr, &tw, &th);
                         SDL_Rect d{label_x + label_offset, slot.y + 2, tw, th}; SDL_RenderCopy(renderer, tt, nullptr, &d);
@@ -787,7 +786,7 @@ void render_frame(SDL_Window* window,
         // Drop mode hint
         if (state.drop_mode) {
             SDL_Color hintc{230, 220, 80, 255}; const char* hint = "Drop mode: press 1–0";
-            if (SDL_Surface* hs = TTF_RenderUTF8_Blended(ui_font, hint, hintc)) {
+            if (SDL_Surface* hs = TTF_RenderUTF8_Blended(gfx.ui_font, hint, hintc)) {
                 SDL_Texture* ht = SDL_CreateTextureFromSurface(renderer, hs);
                 int tw = 0, th = 0; SDL_QueryTexture(ht, nullptr, nullptr, &tw, &th);
                 SDL_Rect d{sx, sy - th - 8, tw, th}; SDL_RenderCopy(renderer, ht, nullptr, &d);
@@ -832,13 +831,13 @@ void render_frame(SDL_Window* window,
                 SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255); SDL_RenderDrawRect(renderer, &box);
                 int tx = px + 12; int ty = py + 12; int lh = 18;
                 auto draw_txt = [&](const std::string& s, SDL_Color col) {
-                    SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, s.c_str(), col);
+                    SDL_Surface* srf = TTF_RenderUTF8_Blended(gfx.ui_font, s.c_str(), col);
                     if (srf) { SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, srf); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{tx, ty, tw, th}; SDL_RenderCopy(renderer, t, nullptr, &d); SDL_DestroyTexture(t); SDL_FreeSurface(srf);} ty += lh; };
                 if (sel->kind == INV_ITEM) {
                     if (const ItemInstance* inst = state.items.get(sel->vid)) {
                         std::string nm = "item"; std::string desc; uint32_t maxc = 1; bool consume = false; int sid = -1;
                         if (g_lua_mgr) { for (auto const& d : g_lua_mgr->items()) if (d.type == inst->def_type) { nm=d.name; desc=d.desc; maxc=(uint32_t)d.max_count; consume=d.consume_on_use; if(!d.sprite.empty() && d.sprite.find(':')!=std::string::npos && g_sprite_ids) sid=g_sprite_ids->try_get(d.sprite); break; } }
-                        if (sid >= 0) if (SDL_Texture* tex = textures.get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 36; }
+                        if (sid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 36; }
                         draw_txt(std::string("Item: ") + nm, SDL_Color{255,255,255,255});
                         draw_txt(std::string("Count: ") + std::to_string(inst->count) + "/" + std::to_string(maxc), SDL_Color{220,220,220,255});
                         if (!desc.empty()) draw_txt(std::string("Desc: ") + desc, SDL_Color{200,200,200,255});
@@ -850,7 +849,7 @@ void render_frame(SDL_Window* window,
                         if (g_lua_mgr) { for (auto const& g : g_lua_mgr->guns()) if (g.type == gi->def_type) { gdp = &g; break; } }
                         if (gdp) {
                             int gun_sid = -1; if (!gdp->sprite.empty() && g_sprite_ids) gun_sid = g_sprite_ids->try_get(gdp->sprite);
-                            if (gun_sid >= 0) if (SDL_Texture* tex = textures.get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; }
+                            if (gun_sid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; }
                             draw_txt(std::string("Gun: ") + gdp->name, SDL_Color{255,255,255,255});
                             draw_txt(std::string("Damage: ") + std::to_string((int)std::lround(gdp->damage)), SDL_Color{220,220,220,255});
                             draw_txt(std::string("RPM: ") + std::to_string((int)std::lround(gdp->rpm)), SDL_Color{220,220,220,255});
@@ -864,7 +863,7 @@ void render_frame(SDL_Window* window,
                             if (gi->ammo_type != 0) {
                                 if (auto const* ad = g_lua_mgr->find_ammo(gi->ammo_type)) {
                                     int asid = (!ad->sprite.empty() && g_sprite_ids) ? g_sprite_ids->try_get(ad->sprite) : -1;
-                                    if (asid >= 0) if (SDL_Texture* tex = textures.get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
+                                    if (asid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
                                     draw_txt(std::string("Ammo: ") + ad->name, SDL_Color{255,255,255,255});
                                     if (!ad->desc.empty()) draw_txt(std::string("Desc: ") + ad->desc, SDL_Color{200,200,200,255});
                                     int apct = (int)std::lround(ad->armor_pen * 100.0f);
@@ -883,7 +882,7 @@ void render_frame(SDL_Window* window,
     }
 
     // Right-side equipped gun info panel (toggle with V)
-    if (ui_font && state.mode == ids::MODE_PLAYING && state.player_vid && g_lua_mgr && state.show_gun_panel) {
+    if (gfx.ui_font && state.mode == ids::MODE_PLAYING && state.player_vid && g_lua_mgr && state.show_gun_panel) {
         const Entity* ply = state.entities.get(*state.player_vid);
         if (ply && ply->equipped_gun_vid.has_value()) {
             const GunDef* gd = nullptr; const GunInstance* gi_inst = state.guns.get(*ply->equipped_gun_vid);
@@ -895,46 +894,46 @@ void render_frame(SDL_Window* window,
                 SDL_SetRenderDrawColor(renderer, 25, 25, 30, 220); SDL_RenderFillRect(renderer, &box);
                 SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255); SDL_RenderDrawRect(renderer, &box);
                 int tx = px + 12; int ty = py + 12; int lh = 18;
-                auto draw_txt = [&](const std::string& s, SDL_Color col){ SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, s.c_str(), col); if (srf){ SDL_Texture* t=SDL_CreateTextureFromSurface(renderer,srf); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{tx,ty,tw,th}; SDL_RenderCopy(renderer,t,nullptr,&d); SDL_DestroyTexture(t); SDL_FreeSurface(srf);} ty += lh; };
+                auto draw_txt = [&](const std::string& s, SDL_Color col){ SDL_Surface* srf = TTF_RenderUTF8_Blended(gfx.ui_font, s.c_str(), col); if (srf){ SDL_Texture* t=SDL_CreateTextureFromSurface(renderer,srf); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{tx,ty,tw,th}; SDL_RenderCopy(renderer,t,nullptr,&d); SDL_DestroyTexture(t); SDL_FreeSurface(srf);} ty += lh; };
                 // Icon
-                if (!gd->sprite.empty() && g_sprite_ids) { int sid = g_sprite_ids->try_get(gd->sprite); if (sid >= 0) if (SDL_Texture* tex = textures.get(sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; } }
+                if (!gd->sprite.empty() && g_sprite_ids) { int sid = g_sprite_ids->try_get(gd->sprite); if (sid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; } }
                 // Key stats
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Gun", gd->name);
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Damage", std::to_string((int)std::lround(gd->damage)));
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "RPM", std::to_string((int)std::lround(gd->rpm)));
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Deviation", fmt2(gd->deviation) + " deg");
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Pellets", std::to_string(gd->pellets_per_shot));
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gd->max_recoil_spread_deg)) + " deg");
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Reload", std::to_string((int)std::lround(gd->reload_time * 1000.0f)) + " ms");
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Eject", std::to_string((int)std::lround(gd->eject_time * 1000.0f)) + " ms");
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Jam", std::to_string((int)std::lround(gd->jam_chance * 100.0f)) + " %");
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AR Center", fmt2(gd->ar_pos) + " ±" + fmt2(gd->ar_pos_variance));
-                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AR Size", fmt2(gd->ar_size) + " ±" + fmt2(gd->ar_size_variance));
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Gun", gd->name);
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Damage", std::to_string((int)std::lround(gd->damage)));
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "RPM", std::to_string((int)std::lround(gd->rpm)));
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Deviation", fmt2(gd->deviation) + " deg");
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Pellets", std::to_string(gd->pellets_per_shot));
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gd->max_recoil_spread_deg)) + " deg");
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Reload", std::to_string((int)std::lround(gd->reload_time * 1000.0f)) + " ms");
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Eject", std::to_string((int)std::lround(gd->eject_time * 1000.0f)) + " ms");
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Jam", std::to_string((int)std::lround(gd->jam_chance * 100.0f)) + " %");
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AR Center", fmt2(gd->ar_pos) + " ±" + fmt2(gd->ar_pos_variance));
+                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AR Size", fmt2(gd->ar_size) + " ±" + fmt2(gd->ar_size_variance));
                 if (gd->rpm > 0.0f || gd->shot_interval > 0.0f) { float dt = gd->shot_interval > 0.0f ? gd->shot_interval : (60.0f / std::max(1.0f, gd->rpm)); int ms = (int)std::lround(dt * 1000.0f); draw_txt(std::string("Shot Time: ") + std::to_string(ms) + " ms", SDL_Color{220,220,220,255}); }
                 if (gd->fire_mode == std::string("burst") && (gd->burst_rpm > 0.0f || gd->burst_interval > 0.0f)) { draw_txt(std::string("Burst RPM: ") + std::to_string((int)std::lround(gd->burst_rpm)), SDL_Color{220,220,220,255}); float bdt = gd->burst_interval > 0.0f ? gd->burst_interval : (gd->burst_rpm > 0.0f ? 60.0f / gd->burst_rpm : 0.0f); if (bdt > 0.0f) { int bms = (int)std::lround(bdt * 1000.0f); draw_txt(std::string("Burst Time: ") + std::to_string(bms) + " ms", SDL_Color{220,220,220,255}); } }
                 // Fire mode label
                 { std::string fm_label = "Auto"; if (gd->fire_mode == "single") fm_label = "Semi"; else if (gd->fire_mode == "burst") fm_label = "Burst"; draw_txt(std::string("Mode: ") + fm_label, SDL_Color{220,220,220,255}); }
                 // Current mag/reserve
                 if (gi_inst) {
-                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Mag", std::to_string(gi_inst->current_mag));
-                    ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Reserve", std::to_string(gi_inst->ammo_reserve));
+                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Mag", std::to_string(gi_inst->current_mag));
+                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Reserve", std::to_string(gi_inst->ammo_reserve));
                     if (gi_inst->ammo_type != 0) {
                         if (auto const* ad = g_lua_mgr->find_ammo(gi_inst->ammo_type)) {
                             int asid = (!ad->sprite.empty() && g_sprite_ids) ? g_sprite_ids->try_get(ad->sprite) : -1;
-                            if (asid >= 0) if (SDL_Texture* tex = textures.get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
+                            if (asid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
                             int apct = (int)std::lround(ad->armor_pen * 100.0f);
-                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Ammo", ad->name);
-                            if (!ad->desc.empty()) ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Desc", ad->desc);
-                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "DMG", fmt2(ad->damage_mult));
-                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "AP", std::to_string(apct) + "%");
-                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Shield", fmt2(ad->shield_mult));
+                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Ammo", ad->name);
+                            if (!ad->desc.empty()) ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Desc", ad->desc);
+                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "DMG", fmt2(ad->damage_mult));
+                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AP", std::to_string(apct) + "%");
+                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Shield", fmt2(ad->shield_mult));
                             if (ad->range_units > 0.0f) {
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
-                                ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
+                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
                             }
-                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
-                            ui_draw_kv_line(renderer, ui_font, tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
+                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
+                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
                         }
                     }
                 }
@@ -944,7 +943,7 @@ void render_frame(SDL_Window* window,
 
     // Alerts and warnings (screen-space)
     // Bottom player condition bars (shield, plates, health, dash)
-    if (ui_font && state.mode == ids::MODE_PLAYING && state.player_vid) {
+    if (gfx.ui_font && state.mode == ids::MODE_PLAYING && state.player_vid) {
         const Entity* p = state.entities.get(*state.player_vid);
         if (p) {
             int group_w = std::max(200, (int)std::lround(width * 0.25));
@@ -963,7 +962,7 @@ void render_frame(SDL_Window* window,
                 state.hp_bar_shake = 0.0f;
             }
             auto draw_num = [&](const std::string& s, int x, int y, SDL_Color col) {
-                SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, s.c_str(), col);
+                SDL_Surface* srf = TTF_RenderUTF8_Blended(gfx.ui_font, s.c_str(), col);
                 if (!srf) return SDL_Point{x, y};
                 SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, srf);
                 int tw = 0, th = 0; SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
@@ -974,8 +973,8 @@ void render_frame(SDL_Window* window,
             auto draw_bar = [&](int x, int y, int w, int h, float ratio, SDL_Color fill) {
                 SDL_Rect bg{x, y, w, h}; SDL_SetRenderDrawColor(renderer, 20, 20, 24, 220); SDL_RenderFillRect(renderer, &bg);
                 SDL_SetRenderDrawColor(renderer, 60, 60, 70, 255); SDL_RenderDrawRect(renderer, &bg);
-                double r = (double)std::clamp(ratio, 0.0f, 1.0f);
-                int fw = (int)std::lround((double)w * r);
+                double rd = (double)std::clamp(ratio, 0.0f, 1.0f);
+                int fw = (int)std::lround((double)w * rd);
                 if (fw > 0) { SDL_Rect fr{x, y, fw, h}; SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, fill.a); SDL_RenderFillRect(renderer, &fr); }
             };
             SDL_Color white{240, 240, 240, 255};
@@ -1013,8 +1012,8 @@ void render_frame(SDL_Window* window,
             if (state.dash_max > 0) {
                 int segs = state.dash_max; int slw = 12; int sgap = 2; int start_x = gx;
                 for (int i = 0; i < segs; ++i) {
-                    int sx = start_x + i * (slw + sgap);
-                    SDL_Rect seg{sx, gy4 + 2, slw, bar_h - 4};
+                    int sx_dash = start_x + i * (slw + sgap);
+                    SDL_Rect seg{sx_dash, gy4 + 2, slw, bar_h - 4};
                     if (i < state.dash_stocks) SDL_SetRenderDrawColor(renderer, 80, 200, 120, 220); else SDL_SetRenderDrawColor(renderer, 40, 60, 70, 200);
                     SDL_RenderFillRect(renderer, &seg);
                     SDL_SetRenderDrawColor(renderer, 20, 30, 40, 255); SDL_RenderDrawRect(renderer, &seg);
@@ -1046,29 +1045,29 @@ void render_frame(SDL_Window* window,
         SDL_RenderFillRect(renderer, &fg);
         SDL_SetRenderDrawColor(renderer, 10, 10, 10, 255);
         SDL_RenderDrawRect(renderer, &bg);
-        if (ui_font) {
+        if (gfx.ui_font) {
             const char* label = "Exiting to next area";
             SDL_Color lc{240, 220, 80, 255};
-            if (SDL_Surface* lsurf = TTF_RenderUTF8_Blended(ui_font, label, lc)) {
+            if (SDL_Surface* lsurf = TTF_RenderUTF8_Blended(gfx.ui_font, label, lc)) {
                 SDL_Texture* ltex = SDL_CreateTextureFromSurface(renderer, lsurf);
                 if (ltex) { int lw=0,lh=0; SDL_QueryTexture(ltex,nullptr,nullptr,&lw,&lh); SDL_Rect ldst{bar_x, bar_y - lh - 6, lw, lh}; SDL_RenderCopy(renderer, ltex, nullptr, &ldst); SDL_DestroyTexture(ltex);} SDL_FreeSurface(lsurf);
             }
             char txt[16]; float secs = std::max(0.0f, state.exit_countdown); std::snprintf(txt, sizeof(txt), "%.1f", (double)secs);
             SDL_Color color{255, 255, 255, 255};
-            if (SDL_Surface* surf = TTF_RenderUTF8_Blended(ui_font, txt, color)) { SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf); if (tex) { int tw=0,th=0; SDL_QueryTexture(tex,nullptr,nullptr,&tw,&th); SDL_Rect dst{bar_x + bar_w / 2 - tw / 2, bar_y - th - 4, tw, th}; SDL_RenderCopy(renderer, tex, nullptr, &dst); SDL_DestroyTexture(tex);} SDL_FreeSurface(surf); }
+            if (SDL_Surface* surf = TTF_RenderUTF8_Blended(gfx.ui_font, txt, color)) { SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf); if (tex) { int tw=0,th=0; SDL_QueryTexture(tex,nullptr,nullptr,&tw,&th); SDL_Rect dst{bar_x + bar_w / 2 - tw / 2, bar_y - th - 4, tw, th}; SDL_RenderCopy(renderer, tex, nullptr, &dst); SDL_DestroyTexture(tex);} SDL_FreeSurface(surf); }
         }
     }
 
     // Alerts and warnings (screen-space)
-    if (ui_font) {
+    if (gfx.ui_font) {
         int ww = 0, wh = 0;
         SDL_GetRendererOutputSize(renderer, &ww, &wh);
         int ax = 12, ay = 12, lh = 18;
         // Alerts in white-ish
         for (const auto& al : state.alerts) {
             std::string msg = al.text;
-            SDL_Color c{230, 230, 240, 255};
-            SDL_Surface* s = TTF_RenderUTF8_Blended(ui_font, msg.c_str(), c);
+            SDL_Color col{230, 230, 240, 255};
+            SDL_Surface* s = TTF_RenderUTF8_Blended(gfx.ui_font, msg.c_str(), col);
             if (s) {
                 SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s);
                 int tw = 0, th = 0;
@@ -1082,8 +1081,8 @@ void render_frame(SDL_Window* window,
         }
         // Warnings in red
         for (const auto& msg : frame_warnings) {
-            SDL_Color c{220, 60, 60, 255};
-            SDL_Surface* s = TTF_RenderUTF8_Blended(ui_font, msg.c_str(), c);
+            SDL_Color col2{220, 60, 60, 255};
+            SDL_Surface* s = TTF_RenderUTF8_Blended(gfx.ui_font, msg.c_str(), col2);
             if (s) {
                 SDL_Texture* t = SDL_CreateTextureFromSurface(renderer, s);
                 int tw = 0, th = 0;
@@ -1102,9 +1101,9 @@ void render_frame(SDL_Window* window,
         SDL_Rect full{0, 0, width, height};
         SDL_SetRenderDrawColor(renderer, 18, 18, 22, 255);
         SDL_RenderFillRect(renderer, &full);
-        if (ui_font) {
+        if (gfx.ui_font) {
             SDL_Color titlec{240, 220, 80, 255};
-            if (SDL_Surface* ts = TTF_RenderUTF8_Blended(ui_font, "Stage Clear", titlec)) {
+            if (SDL_Surface* ts = TTF_RenderUTF8_Blended(gfx.ui_font, "Stage Clear", titlec)) {
                 SDL_Texture* tt = SDL_CreateTextureFromSurface(renderer, ts);
                 int tw=0, th=0; SDL_QueryTexture(tt, nullptr, nullptr, &tw, &th);
                 SDL_Rect td{40, 40, tw, th}; SDL_RenderCopy(renderer, tt, nullptr, &td);
@@ -1112,7 +1111,7 @@ void render_frame(SDL_Window* window,
             }
             if (state.score_ready_timer <= 0.0f) {
                 SDL_Color pc{200, 200, 210, 255};
-                if (SDL_Surface* ps = TTF_RenderUTF8_Blended(ui_font, "Press SPACE or CLICK to continue", pc)) {
+                if (SDL_Surface* ps = TTF_RenderUTF8_Blended(gfx.ui_font, "Press SPACE or CLICK to continue", pc)) {
                     SDL_Texture* ptex = SDL_CreateTextureFromSurface(renderer, ps);
                     int prompt_w=0, prompt_h=0; SDL_QueryTexture(ptex, nullptr, nullptr, &prompt_w, &prompt_h);
                     SDL_Rect pd{width/2 - prompt_w/2, height - prompt_h - 20, prompt_w, prompt_h};
@@ -1126,7 +1125,7 @@ void render_frame(SDL_Window* window,
             if (state.review_next_stat_timer <= 0.0f && state.review_revealed < state.review_stats.size()) {
                 state.review_next_stat_timer = 0.2f;
                 state.review_revealed += 1;
-                sounds.play("base:small_shoot");
+                if (g_audio) g_audio->sounds.play("base:small_shoot");
             }
             state.review_number_tick_timer += (float)dt_sec;
             while (state.review_number_tick_timer >= 0.05f) {
@@ -1137,14 +1136,14 @@ void render_frame(SDL_Window* window,
                     double step = std::max(1.0, std::floor(rs.target / 20.0));
                     if (rs.target < 20.0) step = std::max(0.1, rs.target / 20.0);
                     rs.value = std::min(rs.target, rs.value + step);
-                    sounds.play("base:small_shoot");
+                    if (g_audio) g_audio->sounds.play("base:small_shoot");
                     if (rs.value >= rs.target) rs.done = true;
                 }
             }
         }
-        if (ui_font) {
+        if (gfx.ui_font) {
             int tx = 40; int ty = 80;
-            auto draw_line = [&](const std::string& s, SDL_Color col){ SDL_Surface* srf = TTF_RenderUTF8_Blended(ui_font, s.c_str(), col); if (!srf) return; SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, srf); int tw=0, th=0; SDL_QueryTexture(tex, nullptr, nullptr, &tw, &th); SDL_Rect d{tx, ty, tw, th}; SDL_RenderCopy(renderer, tex, nullptr, &d); SDL_DestroyTexture(tex); SDL_FreeSurface(srf); ty += 18; };
+            auto draw_line = [&](const std::string& s, SDL_Color col){ SDL_Surface* srf = TTF_RenderUTF8_Blended(gfx.ui_font, s.c_str(), col); if (!srf) return; SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, srf); int tw=0, th=0; SDL_QueryTexture(tex, nullptr, nullptr, &tw, &th); SDL_Rect d{tx, ty, tw, th}; SDL_RenderCopy(renderer, tex, nullptr, &d); SDL_DestroyTexture(tex); SDL_FreeSurface(srf); ty += 18; };
             SDL_Color mc{210, 210, 220, 255}; char buf[128];
             for (std::size_t i = 0; i < state.review_revealed && i < state.review_stats.size(); ++i) {
                 auto const& rs = state.review_stats[i];
@@ -1176,9 +1175,9 @@ void render_frame(SDL_Window* window,
         SDL_Rect box{box_x, box_y, box_w, box_h}; SDL_SetRenderDrawColor(renderer, 30, 30, 40, 220); SDL_RenderFillRect(renderer, &box);
         SDL_SetRenderDrawColor(renderer, 200, 200, 220, 255); SDL_RenderDrawRect(renderer, &box);
         SDL_SetRenderDrawColor(renderer, 240, 220, 80, 255); SDL_RenderDrawLine(renderer, box_x + 20, box_y + 20, box_x + box_w - 20, box_y + 20);
-        if (ui_font) {
-            SDL_Color titlec{240, 220, 80, 255}; if (SDL_Surface* ts = TTF_RenderUTF8_Blended(ui_font, "Next Area", titlec)) { SDL_Texture* tt = SDL_CreateTextureFromSurface(renderer, ts); int tw=0, th=0; SDL_QueryTexture(tt,nullptr,nullptr,&tw,&th); SDL_Rect td{box_x + 24, box_y + 16, tw, th}; SDL_RenderCopy(renderer, tt, nullptr, &td); SDL_DestroyTexture(tt); SDL_FreeSurface(ts); }
-            if (state.score_ready_timer <= 0.0f) { SDL_Color pc{200, 200, 210, 255}; if (SDL_Surface* ps = TTF_RenderUTF8_Blended(ui_font, "Press SPACE or CLICK to continue", pc)) { SDL_Texture* ptex = SDL_CreateTextureFromSurface(renderer, ps); int prompt_w=0,prompt_h=0; SDL_QueryTexture(ptex,nullptr,nullptr,&prompt_w,&prompt_h); SDL_Rect pd{width/2 - prompt_w/2, height - prompt_h - 20, prompt_w, prompt_h}; SDL_RenderCopy(renderer, ptex, nullptr, &pd); SDL_DestroyTexture(ptex); SDL_FreeSurface(ps);} }
+        if (gfx.ui_font) {
+            SDL_Color titlec{240, 220, 80, 255}; if (SDL_Surface* ts = TTF_RenderUTF8_Blended(gfx.ui_font, "Next Area", titlec)) { SDL_Texture* tt = SDL_CreateTextureFromSurface(renderer, ts); int tw=0, th=0; SDL_QueryTexture(tt,nullptr,nullptr,&tw,&th); SDL_Rect td{box_x + 24, box_y + 16, tw, th}; SDL_RenderCopy(renderer, tt, nullptr, &td); SDL_DestroyTexture(tt); SDL_FreeSurface(ts); }
+            if (state.score_ready_timer <= 0.0f) { SDL_Color pc{200, 200, 210, 255}; if (SDL_Surface* ps = TTF_RenderUTF8_Blended(gfx.ui_font, "Press SPACE or CLICK to continue", pc)) { SDL_Texture* ptex = SDL_CreateTextureFromSurface(renderer, ps); int prompt_w=0,prompt_h=0; SDL_QueryTexture(ptex,nullptr,nullptr,&prompt_w,&prompt_h); SDL_Rect pd{width/2 - prompt_w/2, height - prompt_h - 20, prompt_w, prompt_h}; SDL_RenderCopy(renderer, ptex, nullptr, &pd); SDL_DestroyTexture(ptex); SDL_FreeSurface(ps);} }
         }
     }
 

@@ -78,7 +78,7 @@ Source layout (engine)
 ----------------------
 
 - `src/main.cpp`: App entry; window + main loop, input build, fixed 60 Hz sim tick, page mode transitions. Delegates to `render_frame(...)` and `sim_*` helpers.
-- `src/render.hpp/cpp`: All rendering, including world (tiles/entities/pickups/items/guns), HUD (reticle, bars, inventory), panels (character, equipped gun, ground inspect), and pages (Score Review with animated metrics + sounds, Next Stage page). Call: `render_frame(window, renderer, textures, ui_font, state, gfx, dt_sec, binds, projectiles, sounds)`.
+- `src/render.hpp/cpp`: All rendering, including world (tiles/entities/pickups/items/guns), HUD (reticle, bars, inventory), panels (character, equipped gun, ground inspect), and pages (Score Review with animated metrics + sounds, Next Stage page). Call: `render_frame(state, gfx, dt_sec, binds, projectiles)`. Uses global `g_textures` and `gfx.ui_font`.
 - `src/sim.hpp/cpp`: Simulation helpers called from the fixed-step loop: movement/collision, shield regen + reloads, drop mode, number-row inventory handling (equip/select), ground repulsion, crate open progress, projectile stepping.
 - `src/room.hpp/cpp`: Room generation and spawn helpers.
 - `src/luamgr.*`: Lua content registration and calls.

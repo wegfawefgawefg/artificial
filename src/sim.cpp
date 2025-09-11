@@ -9,11 +9,14 @@
 #include "items.hpp"
 #include "mods.hpp"
 #include "sound.hpp"
+#include "audio.hpp"
+#include "globals.hpp"
 #include <algorithm>
 #include <cmath>
 #include <random>
 
-void sim_pre_physics_ticks(State& state) {
+void sim_pre_physics_ticks() {
+    auto& state = *g_state;
     if (state.player_vid && g_lua_mgr) {
         Entity* plbt = state.entities.get_mut(*state.player_vid);
         if (plbt) {
@@ -74,7 +77,8 @@ void sim_pre_physics_ticks(State& state) {
     }
 }
 
-void sim_move_and_collide(State& state, Graphics& gfx) {
+void sim_move_and_collide(Graphics& gfx) {
+    auto& state = *g_state;
     (void)gfx; // currently unused here, reserved for future camera/scale interactions
     for (auto& e : state.entities.data()) {
         if (!e.active)
@@ -196,7 +200,8 @@ void sim_move_and_collide(State& state, Graphics& gfx) {
     }
 }
 
-void sim_shield_and_reload(State& state) {
+void sim_shield_and_reload() {
+    auto& state = *g_state;
     for (auto& e : state.entities.data()) {
         if (!e.active)
             continue;
@@ -233,7 +238,8 @@ void sim_shield_and_reload(State& state) {
     }
 }
 
-void sim_toggle_drop_mode(State& state) {
+void sim_toggle_drop_mode() {
+    auto& state = *g_state;
     static bool prev_drop = false;
     if (state.playing_inputs.drop && !prev_drop) {
         state.drop_mode = !state.drop_mode;
@@ -244,7 +250,8 @@ void sim_toggle_drop_mode(State& state) {
     prev_drop = state.playing_inputs.drop;
 }
 
-void sim_inventory_number_row(State& state) {
+void sim_inventory_number_row() {
+    auto& state = *g_state;
     bool nums[10] = {state.playing_inputs.num_row_1, state.playing_inputs.num_row_2,
                      state.playing_inputs.num_row_3, state.playing_inputs.num_row_4,
                      state.playing_inputs.num_row_5, state.playing_inputs.num_row_6,
@@ -364,7 +371,8 @@ void sim_inventory_number_row(State& state) {
     }
 }
 
-void sim_ground_repulsion(State& state) {
+void sim_ground_repulsion() {
+    auto& state = *g_state;
     for (auto& giA : state.ground_items.data())
         if (giA.active) {
             for (auto& giB : state.ground_items.data())
@@ -468,7 +476,8 @@ void sim_ground_repulsion(State& state) {
         }
 }
 
-void sim_update_crates_open(State& state) {
+void sim_update_crates_open() {
+    auto& state = *g_state;
     if (!state.player_vid)
         return;
     const Entity* p = state.entities.get(*state.player_vid);
@@ -560,7 +569,8 @@ void sim_update_crates_open(State& state) {
         }
 }
 
-void sim_step_projectiles(State& state, Projectiles& projectiles) {
+void sim_step_projectiles(Projectiles& projectiles) {
+    auto& state = *g_state;
     struct HitInfo {
         std::size_t eid;
         std::optional<VID> owner;
@@ -751,7 +761,8 @@ void sim_step_projectiles(State& state, Projectiles& projectiles) {
     }
 }
 
-void sim_handle_pickups(State& state, SoundStore& sounds) {
+void sim_handle_pickups() {
+    auto& state = *g_state;
     if (state.mode != ids::MODE_PLAYING || !state.player_vid)
         return;
     const Entity* p = state.entities.get(*state.player_vid);
@@ -815,7 +826,7 @@ void sim_handle_pickups(State& state, SoundStore& sounds) {
                     const GunDef* gd = nullptr;
                     if (g_lua_mgr) for (auto const& g : g_lua_mgr->guns()) if (g.type == ggi->def_type) { gd = &g; break; }
                     if (g_lua_mgr && state.player_vid) if (auto* plent = state.entities.get_mut(*state.player_vid)) g_lua_mgr->call_gun_on_pickup(ggi->def_type, state, *plent);
-                    if (gd) sounds.play(gd->sound_pickup.empty() ? "base:drop" : gd->sound_pickup); else sounds.play("base:drop");
+                    if (gd) g_audio->sounds.play(gd->sound_pickup.empty() ? "base:drop" : gd->sound_pickup); else g_audio->sounds.play("base:drop");
                 }
             } else {
                 state.alerts.push_back({"Inventory full", 0.0f, 1.5f, false});
@@ -858,7 +869,7 @@ void sim_handle_pickups(State& state, SoundStore& sounds) {
                     if (g_lua_mgr && pick) {
                         const ItemDef* idf = nullptr;
                         for (auto const& d : g_lua_mgr->items()) if (d.type == pick->def_type) { idf = &d; break; }
-                        if (idf) sounds.play(idf->sound_pickup.empty() ? "base:drop" : idf->sound_pickup); else sounds.play("base:drop");
+                        if (idf) g_audio->sounds.play(idf->sound_pickup.empty() ? "base:drop" : idf->sound_pickup); else g_audio->sounds.play("base:drop");
                     }
                     if (state.player_vid) if (auto* pm = state.metrics_for(*state.player_vid)) pm->items_picked += 1;
                 } else {

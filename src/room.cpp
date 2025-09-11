@@ -1,4 +1,5 @@
 #include "room.hpp"
+#include "globals.hpp"
 
 #include "globals.hpp"
 #include "luamgr.hpp"
@@ -10,7 +11,8 @@
 #include <filesystem>
 #include <random>
 
-void generate_room(State& state, Projectiles& projectiles, SDL_Renderer* renderer, Graphics& gfx) {
+void generate_room(Projectiles& projectiles, Graphics& gfx) {
+    auto& state = *g_state;
     // Reset world
     projectiles = Projectiles{};
     state.entities = Entities{};
@@ -136,9 +138,9 @@ void generate_room(State& state, Projectiles& projectiles, SDL_Renderer* rendere
     }
 
     // Camera to player and zoom for ~8%
-    if (renderer && state.player_vid) {
+    if (gfx.renderer && state.player_vid) {
         int ww = 0, wh = 0;
-        SDL_GetRendererOutputSize(renderer, &ww, &wh);
+        SDL_GetRendererOutputSize(gfx.renderer, &ww, &wh);
         float min_dim = static_cast<float>(std::min(ww, wh));
         const Entity* p = state.entities.get(*state.player_vid);
         if (p) {

@@ -1,6 +1,7 @@
 #include "input_system.hpp"
 
 #include "types.hpp"
+#include "globals.hpp"
 
 #include <algorithm>
 
@@ -9,7 +10,7 @@ static bool is_down(SDL_Scancode sc) {
     return ks[sc] != 0;
 }
 
-void process_events(SDL_Event& ev, InputContext& ctx, State& state, bool& request_quit) {
+void process_events(SDL_Event& ev, InputContext& ctx, bool& request_quit) {
     switch (ev.type) {
     case SDL_QUIT:
         request_quit = true;
@@ -22,13 +23,16 @@ void process_events(SDL_Event& ev, InputContext& ctx, State& state, bool& reques
     }
     int mx = 0, my = 0;
     Uint32 mbtn = SDL_GetMouseState(&mx, &my);
-    state.mouse_inputs.left = (mbtn & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
-    state.mouse_inputs.right = (mbtn & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
-    state.mouse_inputs.pos = {mx, my};
+    if (g_state) {
+        g_state->mouse_inputs.left = (mbtn & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
+        g_state->mouse_inputs.right = (mbtn & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
+        g_state->mouse_inputs.pos = {mx, my};
+    }
 }
 
-void build_inputs(const InputBindings& bind, const InputContext& ctx, State& state, Graphics& gfx,
+void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& gfx,
                   float dt) {
+    auto& state = *g_state;
     if (is_down(SDL_SCANCODE_ESCAPE))
         state.running = false;
     state.mouse_inputs.scroll = ctx.wheel_delta;
@@ -77,7 +81,7 @@ void build_inputs(const InputBindings& bind, const InputContext& ctx, State& sta
     state.playing_input_debounce_timers.step(dt);
     state.playing_inputs = state.playing_input_debounce_timers.debounce(pi);
 
-    process_input_per_mode(state, gfx);
+    process_input_per_mode(gfx);
 
     if (ctx.wheel_delta != 0.0f) {
         const float ZOOM_INCREMENT = 0.25f;
@@ -105,7 +109,8 @@ void build_inputs(const InputBindings& bind, const InputContext& ctx, State& sta
     prev_v = v_now;
 }
 
-void process_input_per_mode(State& state, Graphics& gfx) {
+void process_input_per_mode(Graphics& gfx) {
+    auto& state = *g_state;
     if (state.mode == ids::MODE_TITLE) {
         if (state.menu_inputs.confirm) {
             state.mode = ids::MODE_PLAYING;
