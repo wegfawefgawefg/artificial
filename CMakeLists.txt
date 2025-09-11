@@ -11,41 +11,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable(gub
-  src/main.cpp
-  src/luamgr.hpp
-  src/luamgr.cpp
-  src/tex.hpp
-  src/tex.cpp
-  src/types.hpp
-  src/entity.hpp
-  src/entities.hpp
-  src/entities.cpp
-  src/stage.hpp
-  src/particles.hpp
-  src/inputs.hpp
-  src/graphics.hpp
-  src/state.hpp
-  src/input_system.hpp
-  src/input_system.cpp
-  src/projectiles.hpp
-  src/config.hpp
-  src/config.cpp
-  src/mods.hpp
-  src/mods.cpp
-  src/sprites.hpp
-  src/sprites.cpp
-  src/globals.hpp
-  src/globals.cpp
-  src/room.hpp
-  src/room.cpp
-  src/app.hpp
-  src/app.cpp
-  src/render.hpp
-  src/render.cpp
-  src/sim.hpp
-  src/sim.cpp
+# Auto-discover all sources/headers in src (no manual list)
+# CONFIGURE_DEPENDS makes CMake reconfigure when files are added/removed
+file(GLOB_RECURSE GUB_SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/src/*.cpp"
+  "${CMAKE_SOURCE_DIR}/src/*.cxx"
+  "${CMAKE_SOURCE_DIR}/src/*.cc"
 )
+file(GLOB_RECURSE GUB_HEADERS CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/src/*.hpp"
+  "${CMAKE_SOURCE_DIR}/src/*.h"
+)
+
+add_executable(gub ${GUB_SOURCES} ${GUB_HEADERS})
 
 function(target_enable_strict_warnings tgt)
   if (MSVC)
