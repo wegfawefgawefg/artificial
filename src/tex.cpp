@@ -1,4 +1,6 @@
 #include "tex.hpp"
+#include "globals.hpp"
+#include "graphics.hpp"
 
 #include <cstdio>
 
@@ -8,7 +10,11 @@ TextureStore::~TextureStore() {
             SDL_DestroyTexture(kv.second);
 }
 
-bool TextureStore::load_all(SDL_Renderer* r, const SpriteStore& sprites) {
+bool TextureStore::load_all() {
+    if (!g_gfx || !g_gfx->renderer || !g_sprite_store)
+        return false;
+    SDL_Renderer* r = g_gfx->renderer;
+    const SpriteStore& sprites = *g_sprite_store;
     for (int id = 0; id < sprites.size(); ++id) {
         auto* def = sprites.get_def_by_id(id);
         if (!def)

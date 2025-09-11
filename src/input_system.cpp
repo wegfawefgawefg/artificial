@@ -10,13 +10,13 @@ static bool is_down(SDL_Scancode sc) {
     return ks[sc] != 0;
 }
 
-void process_events(SDL_Event& ev, InputContext& ctx, bool& request_quit) {
+void process_events(SDL_Event& ev, bool& request_quit) {
     switch (ev.type) {
     case SDL_QUIT:
         request_quit = true;
         break;
     case SDL_MOUSEWHEEL:
-        ctx.wheel_delta += static_cast<float>(ev.wheel.preciseY);
+        if (g_input) g_input->wheel_delta += static_cast<float>(ev.wheel.preciseY);
         break;
     default:
         break;
@@ -30,12 +30,13 @@ void process_events(SDL_Event& ev, InputContext& ctx, bool& request_quit) {
     }
 }
 
-void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& gfx) {
+void build_inputs() {
     float dt = g_state ? static_cast<float>(g_state->dt) : 0.0f;
     auto& state = *g_state;
+    auto* binds = g_binds;
     if (is_down(SDL_SCANCODE_ESCAPE))
         state.running = false;
-    state.mouse_inputs.scroll = ctx.wheel_delta;
+    state.mouse_inputs.scroll = g_input ? g_input->wheel_delta : 0.0f;
 
     MenuInputs menu{};
     menu.left = is_down(SDL_SCANCODE_LEFT) || is_down(SDL_SCANCODE_A);
@@ -48,6 +49,9 @@ void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& 
     state.menu_inputs = state.menu_input_debounce_timers.debounce(menu);
 
     PlayingInputs pi{};
+    // Use global bindings if available; otherwise default-constructed local
+    InputBindings local_defaults{};
+    const InputBindings& bind = binds ? *binds : local_defaults;
     pi.left = is_down(bind.left);
     pi.right = is_down(bind.right);
     pi.up = is_down(bind.up);
@@ -81,15 +85,17 @@ void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& 
     state.playing_input_debounce_timers.step(dt);
     state.playing_inputs = state.playing_input_debounce_timers.debounce(pi);
 
-    process_input_per_mode(gfx);
+    process_input_per_mode();
 
-    if (ctx.wheel_delta != 0.0f) {
+    if (g_input && g_input->wheel_delta != 0.0f) {
         const float ZOOM_INCREMENT = 0.25f;
         const float MIN_ZOOM = 0.5f;
         const float MAX_ZOOM = 32.0f;
-        float dir = (ctx.wheel_delta > 0.0f) ? 1.0f : -1.0f;
-        gfx.play_cam.zoom =
-            std::clamp(gfx.play_cam.zoom + dir * ZOOM_INCREMENT, MIN_ZOOM, MAX_ZOOM);
+        float dir = (g_input->wheel_delta > 0.0f) ? 1.0f : -1.0f;
+        if (g_gfx) {
+            g_gfx->play_cam.zoom =
+                std::clamp(g_gfx->play_cam.zoom + dir * ZOOM_INCREMENT, MIN_ZOOM, MAX_ZOOM);
+        }
     }
 
     // Toggle character panel with 'C'
@@ -109,13 +115,15 @@ void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& 
     prev_v = v_now;
 }
 
-void process_input_per_mode(Graphics& gfx) {
+void process_input_per_mode() {
     auto& state = *g_state;
     if (state.mode == ids::MODE_TITLE) {
         if (state.menu_inputs.confirm) {
             state.mode = ids::MODE_PLAYING;
-            gfx.camera.zoom = 2.0f;
-            gfx.play_cam.zoom = 2.0f;
+            if (g_gfx) {
+                g_gfx->camera.zoom = 2.0f;
+                g_gfx->play_cam.zoom = 2.0f;
+            }
         }
     } else if (state.mode == ids::MODE_GAME_OVER) {
         if (state.menu_inputs.confirm)

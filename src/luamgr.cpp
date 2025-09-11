@@ -2,6 +2,7 @@
 
 #include "entity.hpp"
 #include "state.hpp"
+#include "globals.hpp"
 #ifdef GUB_USE_SOL2
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -976,10 +977,9 @@ void LuaManager::call_ammo_on_hit_tile(int ammo_type) {
 #endif
 }
 
-void LuaManager::call_crate_on_open(int crate_type, State& state, Entity& player) {
+void LuaManager::call_crate_on_open(int crate_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     for (auto const& c : crates_)
         if (c.type == crate_type) {
@@ -996,22 +996,20 @@ void LuaManager::call_crate_on_open(int crate_type, State& state, Entity& player
         }
 #else
     (void)crate_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)crate_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_on_dash(State& state, Entity& player) {
+void LuaManager::call_on_dash(Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     if (on_dash_ref >= 0) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, on_dash_ref);
@@ -1034,21 +1032,19 @@ void LuaManager::call_on_dash(State& state, Entity& player) {
     g_state_ctx = nullptr;
     g_player_ctx = nullptr;
 #else
-    (void)state;
     (void)player;
 #endif
 #else
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_on_step(State& state, Entity* player) {
+void LuaManager::call_on_step(Entity* player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = player;
     if (on_step_ref >= 0) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, on_step_ref);
@@ -1061,21 +1057,19 @@ void LuaManager::call_on_step(State& state, Entity* player) {
     g_state_ctx = nullptr;
     g_player_ctx = nullptr;
 #else
-    (void)state;
     (void)player;
 #endif
 #else
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_on_active_reload(State& state, Entity& player) {
+void LuaManager::call_on_active_reload(Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     if (on_active_reload_ref >= 0) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, on_active_reload_ref);
@@ -1099,21 +1093,19 @@ void LuaManager::call_on_active_reload(State& state, Entity& player) {
     g_state_ctx = nullptr;
     g_player_ctx = nullptr;
 #else
-    (void)state;
     (void)player;
 #endif
 #else
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_on_failed_active_reload(State& state, Entity& player) {
+void LuaManager::call_on_failed_active_reload(Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     if (on_failed_active_reload_ref >= 0) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, on_failed_active_reload_ref);
@@ -1138,21 +1130,19 @@ void LuaManager::call_on_failed_active_reload(State& state, Entity& player) {
     g_state_ctx = nullptr;
     g_player_ctx = nullptr;
 #else
-    (void)state;
     (void)player;
 #endif
 #else
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_on_tried_after_failed_ar(State& state, Entity& player) {
+void LuaManager::call_on_tried_after_failed_ar(Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     if (on_tried_after_failed_ar_ref >= 0) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, on_tried_after_failed_ar_ref);
@@ -1179,21 +1169,19 @@ void LuaManager::call_on_tried_after_failed_ar(State& state, Entity& player) {
     g_state_ctx = nullptr;
     g_player_ctx = nullptr;
 #else
-    (void)state;
     (void)player;
 #endif
 #else
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_on_eject(State& state, Entity& player) {
+void LuaManager::call_on_eject(Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     if (on_eject_ref >= 0) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, on_eject_ref);
@@ -1216,21 +1204,19 @@ void LuaManager::call_on_eject(State& state, Entity& player) {
     g_state_ctx = nullptr;
     g_player_ctx = nullptr;
 #else
-    (void)state;
     (void)player;
 #endif
 #else
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_on_reload_start(State& state, Entity& player) {
+void LuaManager::call_on_reload_start(Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     if (on_reload_start_ref >= 0) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, on_reload_start_ref);
@@ -1253,21 +1239,19 @@ void LuaManager::call_on_reload_start(State& state, Entity& player) {
     g_state_ctx = nullptr;
     g_player_ctx = nullptr;
 #else
-    (void)state;
     (void)player;
 #endif
 #else
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_on_reload_finish(State& state, Entity& player) {
+void LuaManager::call_on_reload_finish(Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     if (on_reload_finish_ref >= 0) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, on_reload_finish_ref);
@@ -1290,19 +1274,16 @@ void LuaManager::call_on_reload_finish(State& state, Entity& player) {
     g_state_ctx = nullptr;
     g_player_ctx = nullptr;
 #else
-    (void)state;
     (void)player;
 #endif
 #else
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_gun_on_eject(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_eject(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_eject_ref < 0)
@@ -1315,20 +1296,17 @@ void LuaManager::call_gun_on_eject(int gun_type, State& state, Entity& player) {
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_gun_on_reload_start(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_reload_start(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_reload_start_ref < 0)
@@ -1341,20 +1319,17 @@ void LuaManager::call_gun_on_reload_start(int gun_type, State& state, Entity& pl
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_gun_on_reload_finish(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_reload_finish(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_reload_finish_ref < 0)
@@ -1367,17 +1342,15 @@ void LuaManager::call_gun_on_reload_finish(int gun_type, State& state, Entity& p
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_eject(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_eject(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
@@ -1388,7 +1361,7 @@ void LuaManager::call_item_on_eject(int item_type, State& state, Entity& player)
         }
     if (!def || def->on_eject_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_eject_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -1400,17 +1373,15 @@ void LuaManager::call_item_on_eject(int item_type, State& state, Entity& player)
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_reload_start(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_reload_start(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
@@ -1421,7 +1392,7 @@ void LuaManager::call_item_on_reload_start(int item_type, State& state, Entity& 
         }
     if (!def || def->on_reload_start_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_reload_start_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -1433,17 +1404,15 @@ void LuaManager::call_item_on_reload_start(int item_type, State& state, Entity& 
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_reload_finish(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_reload_finish(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
@@ -1454,7 +1423,7 @@ void LuaManager::call_item_on_reload_finish(int item_type, State& state, Entity&
         }
     if (!def || def->on_reload_finish_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_reload_finish_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -1466,20 +1435,17 @@ void LuaManager::call_item_on_reload_finish(int item_type, State& state, Entity&
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_gun_on_active_reload(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_active_reload(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_active_reload_ref < 0)
@@ -1492,20 +1458,17 @@ void LuaManager::call_gun_on_active_reload(int gun_type, State& state, Entity& p
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_gun_on_failed_active_reload(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_failed_active_reload(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_failed_active_reload_ref < 0)
@@ -1519,20 +1482,17 @@ void LuaManager::call_gun_on_failed_active_reload(int gun_type, State& state, En
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_gun_on_tried_after_failed_ar(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_tried_after_failed_ar(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_tried_after_failed_ar_ref < 0)
@@ -1557,10 +1517,9 @@ void LuaManager::call_gun_on_tried_after_failed_ar(int gun_type, State& state, E
 #endif
 }
 
-void LuaManager::call_gun_on_step(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_step(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_step_ref < 0)
@@ -1573,17 +1532,15 @@ void LuaManager::call_gun_on_step(int gun_type, State& state, Entity& player) {
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_active_reload(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_active_reload(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
@@ -1594,7 +1551,7 @@ void LuaManager::call_item_on_active_reload(int item_type, State& state, Entity&
         }
     if (!def || def->on_active_reload_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_active_reload_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -1606,17 +1563,15 @@ void LuaManager::call_item_on_active_reload(int item_type, State& state, Entity&
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_failed_active_reload(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_failed_active_reload(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
@@ -1627,7 +1582,7 @@ void LuaManager::call_item_on_failed_active_reload(int item_type, State& state, 
         }
     if (!def || def->on_failed_active_reload_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_failed_active_reload_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -1640,17 +1595,15 @@ void LuaManager::call_item_on_failed_active_reload(int item_type, State& state, 
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_tried_after_failed_ar(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_tried_after_failed_ar(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
@@ -1661,7 +1614,7 @@ void LuaManager::call_item_on_tried_after_failed_ar(int item_type, State& state,
         }
     if (!def || def->on_tried_after_failed_ar_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_tried_after_failed_ar_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -1675,20 +1628,17 @@ void LuaManager::call_item_on_tried_after_failed_ar(int item_type, State& state,
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_gun_on_pickup(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_pickup(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_pickup_ref < 0)
@@ -1701,20 +1651,17 @@ void LuaManager::call_gun_on_pickup(int gun_type, State& state, Entity& player) 
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_gun_on_drop(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_drop(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_drop_ref < 0)
@@ -1727,17 +1674,15 @@ void LuaManager::call_gun_on_drop(int gun_type, State& state, Entity& player) {
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_pickup(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_pickup(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
@@ -1748,7 +1693,7 @@ void LuaManager::call_item_on_pickup(int item_type, State& state, Entity& player
         }
     if (!def || def->on_pickup_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_pickup_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -1760,17 +1705,15 @@ void LuaManager::call_item_on_pickup(int item_type, State& state, Entity& player
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_drop(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_drop(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
@@ -1781,7 +1724,7 @@ void LuaManager::call_item_on_drop(int item_type, State& state, Entity& player) 
         }
     if (!def || def->on_drop_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_drop_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -1793,17 +1736,15 @@ void LuaManager::call_item_on_drop(int item_type, State& state, Entity& player) 
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_generate_room(State& state) {
+void LuaManager::call_generate_room() {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
     if (!S)
@@ -1811,7 +1752,7 @@ void LuaManager::call_generate_room(State& state) {
     sol::object obj = S->get<sol::object>("generate_room");
     if (!obj.is<sol::function>())
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = nullptr;
     sol::function f = obj.as<sol::function>();
     sol::protected_function_result r = f();
@@ -1820,18 +1761,15 @@ void LuaManager::call_generate_room(State& state) {
         std::fprintf(stderr, "[lua] error in generate_room: %s\n", e.what());
     }
     g_state_ctx = nullptr;
-#else
-    (void)state;
 #endif
 #else
-    (void)state;
+    (void)0;
 #endif
 }
 
-void LuaManager::call_gun_on_jam(int gun_type, State& state, Entity& player) {
+void LuaManager::call_gun_on_jam(int gun_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
 #ifdef GUB_USE_SOL2
-    (void)state;
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
     if (!gd || gd->on_jam_ref < 0)
@@ -1844,12 +1782,10 @@ void LuaManager::call_gun_on_jam(int gun_type, State& state, Entity& player) {
     }
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 #else
     (void)gun_type;
-    (void)state;
     (void)player;
 #endif
 }
@@ -1922,7 +1858,7 @@ bool LuaManager::load_mods(const std::string& mods_root) {
 #endif
 }
 
-bool LuaManager::call_item_on_use(int item_type, State& state, Entity& player,
+bool LuaManager::call_item_on_use(int item_type, Entity& player,
                                   std::string* out_msg) {
 #ifdef GUB_ENABLE_LUA
     const ItemDef* def = nullptr;
@@ -1933,7 +1869,7 @@ bool LuaManager::call_item_on_use(int item_type, State& state, Entity& player,
         }
     if (!def || def->on_use_ref < 0)
         return false;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_use_ref);
     if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
@@ -1953,14 +1889,13 @@ bool LuaManager::call_item_on_use(int item_type, State& state, Entity& player,
     return true;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
     (void)out_msg;
     return false;
 #endif
 }
 
-void LuaManager::call_item_on_tick(int item_type, State& state, Entity& player, float dt) {
+void LuaManager::call_item_on_tick(int item_type, Entity& player, float dt) {
 #ifdef GUB_ENABLE_LUA
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
@@ -1970,7 +1905,7 @@ void LuaManager::call_item_on_tick(int item_type, State& state, Entity& player, 
         }
     if (!def || def->on_tick_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_tick_ref);
     lua_pushnumber(L, (lua_Number)dt);
@@ -1983,13 +1918,12 @@ void LuaManager::call_item_on_tick(int item_type, State& state, Entity& player, 
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
     (void)dt;
 #endif
 }
 
-void LuaManager::call_item_on_shoot(int item_type, State& state, Entity& player) {
+void LuaManager::call_item_on_shoot(int item_type, Entity& player) {
 #ifdef GUB_ENABLE_LUA
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
@@ -1999,7 +1933,7 @@ void LuaManager::call_item_on_shoot(int item_type, State& state, Entity& player)
         }
     if (!def || def->on_shoot_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_shoot_ref);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
@@ -2011,12 +1945,11 @@ void LuaManager::call_item_on_shoot(int item_type, State& state, Entity& player)
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
 #endif
 }
 
-void LuaManager::call_item_on_damage(int item_type, State& state, Entity& player, int attacker_ap) {
+void LuaManager::call_item_on_damage(int item_type, Entity& player, int attacker_ap) {
 #ifdef GUB_ENABLE_LUA
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
@@ -2026,7 +1959,7 @@ void LuaManager::call_item_on_damage(int item_type, State& state, Entity& player
         }
     if (!def || def->on_damage_ref < 0)
         return;
-    g_state_ctx = &state;
+    g_state_ctx = g_state;
     g_player_ctx = &player;
     lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_damage_ref);
     lua_pushinteger(L, (lua_Integer)attacker_ap);
@@ -2039,7 +1972,6 @@ void LuaManager::call_item_on_damage(int item_type, State& state, Entity& player
     g_player_ctx = nullptr;
 #else
     (void)item_type;
-    (void)state;
     (void)player;
     (void)attacker_ap;
 #endif

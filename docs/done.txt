@@ -86,6 +86,37 @@ Refactor: Globals and signatures (2025-09)
   - `build_inputs(...)` no longer takes `dt` (reads from `g_state->dt`).
 - Cleaned up ambiguous conditionals and shadowed locals to satisfy strict warnings.
 
+Follow-up refactor (globals usage)
+----------------------------------
+
+- Input system now uses globals; removed params:
+  - `build_inputs()` reads `g_binds`, `g_input`, `g_state`, `g_gfx`.
+  - `process_input_per_mode()` reads `g_state` and `g_gfx`.
+  - `process_events()` writes to `g_input` and `g_state`.
+- Physics step: `sim_move_and_collide()` no longer takes `Graphics&`.
+- Room helpers: dropped `State&` params:
+  - `tile_blocks_entity(int x,int y)`, `nearest_walkable_tile(glm::ivec2,int)`, `ensure_not_in_block(glm::vec2)` now read `g_state`.
+- Updated all call sites accordingly; project builds clean.
+
+LuaManager globals refactor
+---------------------------
+
+- Removed `State&` from LuaManager `call_*` methods; they read `g_state`:
+  - Item hooks: on_use, on_tick, on_shoot, on_damage, on_active_reload, on_failed_active_reload,
+    on_tried_after_failed_ar, on_pickup, on_drop, on_eject, on_reload_start, on_reload_finish.
+  - Gun hooks: on_step, on_pickup, on_drop, on_active_reload, on_failed_active_reload,
+    on_tried_after_failed_ar, on_eject, on_reload_start, on_reload_finish, on_jam.
+  - Global hooks: on_dash, on_step.
+  - Crates: call_crate_on_open now omits `State&`.
+- Room: `call_generate_room()` no longer takes `State&`.
+- Updated all call sites in `sim.cpp`, `main.cpp`, and `room.cpp`.
+
+Misc global cleanups
+--------------------
+
+- `TextureStore::load_all()` now uses `g_gfx->renderer` and `*g_sprite_store`; removed params.
+- `ui_draw_kv_line(...)` in `render.cpp` reads `g_gfx` directly; removed `renderer`/`font` params.
+
 Next candidates:
 - Remove remaining `Graphics&` parameters (e.g., `build_inputs(...)`, `sim_move_and_collide(...)`) and use `g_gfx` internally.
 - Gradually expand `RuntimeSettings` to replace hard constants (dash timings, spread dynamics) with runtime-tunable values.

@@ -43,7 +43,7 @@ void sim_pre_physics_ticks() {
                 gi->tick_acc += dt;
                 float period = 1.0f / std::max(1.0f, gd->tick_rate_hz);
                 while (gi->tick_acc >= period && tick_calls < MAX_TICKS) {
-                    g_lua_mgr->call_gun_on_step(gi->def_type, state, *plbt);
+                    g_lua_mgr->call_gun_on_step(gi->def_type, *plbt);
                     gi->tick_acc -= period;
                     ++tick_calls;
                 }
@@ -68,7 +68,7 @@ void sim_pre_physics_ticks() {
                 inst->tick_acc += dt;
                 float period = 1.0f / std::max(1.0f, idf->tick_rate_hz);
                 while (inst->tick_acc >= period && tick_calls < MAX_TICKS) {
-                    g_lua_mgr->call_item_on_tick(inst->def_type, state, *plbt, period);
+                    g_lua_mgr->call_item_on_tick(inst->def_type, *plbt, period);
                     inst->tick_acc -= period;
                     ++tick_calls;
                 }
@@ -77,9 +77,9 @@ void sim_pre_physics_ticks() {
     }
 }
 
-void sim_move_and_collide(Graphics& gfx) {
+void sim_move_and_collide() {
     auto& state = *g_state;
-    (void)gfx; // currently unused here, reserved for future camera/scale interactions
+    // (uses globals; no Graphics param needed)
     for (auto& e : state.entities.data()) {
         if (!e.active)
             continue;
@@ -123,7 +123,7 @@ void sim_move_and_collide(Graphics& gfx) {
                     state.reticle_shake = std::max(state.reticle_shake, 8.0f);
                     if (g_lua_mgr && state.player_vid) {
                         if (auto* pl = state.entities.get_mut(*state.player_vid))
-                            g_lua_mgr->call_on_dash(state, *pl);
+                            g_lua_mgr->call_on_dash(*pl);
                     }
                 }
             }
@@ -269,7 +269,7 @@ void sim_inventory_number_row() {
                 } else if (state.player_vid) {
                     const Entity* p = state.entities.get(*state.player_vid);
                     if (p) {
-                        glm::vec2 place_pos = ensure_not_in_block(state, p->pos);
+                        glm::vec2 place_pos = ensure_not_in_block(p->pos);
                         if (ent->kind == INV_GUN) {
                             int gspr = -1;
                             std::string nm = "gun";
@@ -299,7 +299,7 @@ void sim_inventory_number_row() {
                             if (g_lua_mgr && state.player_vid) {
                                 if (const GunInstance* gi = state.guns.get(ent->vid)) {
                                     if (auto* plent = state.entities.get_mut(*state.player_vid))
-                                        g_lua_mgr->call_gun_on_drop(gi->def_type, state, *plent);
+                                        g_lua_mgr->call_gun_on_drop(gi->def_type, *plent);
                                 }
                             }
                             state.ground_guns.spawn(ent->vid, place_pos, gspr);
@@ -562,7 +562,7 @@ void sim_update_crates_open() {
                     }
                     if (state.player_vid) {
                         if (auto* plent = state.entities.get_mut(*state.player_vid))
-                            g_lua_mgr->call_crate_on_open(c.def_type, state, *plent);
+                            g_lua_mgr->call_crate_on_open(c.def_type, *plent);
                     }
                 }
             }
@@ -677,7 +677,7 @@ void sim_step_projectiles() {
             static thread_local std::mt19937 rng{std::random_device{}()};
             std::uniform_real_distribution<float> U(0.0f, 1.0f);
             if (U(rng) < 0.5f && g_lua_mgr) {
-                glm::vec2 place_pos = ensure_not_in_block(state, pos);
+                glm::vec2 place_pos = ensure_not_in_block(pos);
                 const auto& dt = g_lua_mgr->drops();
                 auto pick_weighted = [&](const std::vector<DropEntry>& v) -> int {
                     if (v.empty())
@@ -825,7 +825,7 @@ void sim_handle_pickups() {
                 if (const GunInstance* ggi = state.guns.get(gg.gun_vid)) {
                     const GunDef* gd = nullptr;
                     if (g_lua_mgr) for (auto const& g : g_lua_mgr->guns()) if (g.type == ggi->def_type) { gd = &g; break; }
-                    if (g_lua_mgr && state.player_vid) if (auto* plent = state.entities.get_mut(*state.player_vid)) g_lua_mgr->call_gun_on_pickup(ggi->def_type, state, *plent);
+                    if (g_lua_mgr && state.player_vid) if (auto* plent = state.entities.get_mut(*state.player_vid)) g_lua_mgr->call_gun_on_pickup(ggi->def_type, *plent);
                     if (gd) g_audio->sounds.play(gd->sound_pickup.empty() ? "base:drop" : gd->sound_pickup); else g_audio->sounds.play("base:drop");
                 }
             } else {
@@ -865,7 +865,7 @@ void sim_handle_pickups() {
                     gi.active = false;
                     did_pick = true;
                     state.alerts.push_back({std::string("Picked up ") + nm, 0.0f, 2.0f, false});
-                    if (g_lua_mgr && pick && state.player_vid) if (auto* plent = state.entities.get_mut(*state.player_vid)) g_lua_mgr->call_item_on_pickup(pick->def_type, state, *plent);
+                    if (g_lua_mgr && pick && state.player_vid) if (auto* plent = state.entities.get_mut(*state.player_vid)) g_lua_mgr->call_item_on_pickup(pick->def_type, *plent);
                     if (g_lua_mgr && pick) {
                         const ItemDef* idf = nullptr;
                         for (auto const& d : g_lua_mgr->items()) if (d.type == pick->def_type) { idf = &d; break; }

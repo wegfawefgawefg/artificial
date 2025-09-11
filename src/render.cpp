@@ -20,11 +20,13 @@ static inline std::string fmt2(float v) {
     std::snprintf(buf, sizeof(buf), "%.2f", (double)v);
     return std::string(buf);
 }
-static inline void ui_draw_kv_line(SDL_Renderer* renderer, TTF_Font* font,
-                                   int tx, int& ty, int lh,
+static inline void ui_draw_kv_line(int tx, int& ty, int lh,
                                    const char* key, const std::string& value,
                                    SDL_Color key_color = SDL_Color{150,150,150,255},
                                    SDL_Color val_color = SDL_Color{230,230,230,255}) {
+    SDL_Renderer* renderer = g_gfx ? g_gfx->renderer : nullptr;
+    TTF_Font* font = g_gfx ? g_gfx->ui_font : nullptr;
+    if (!renderer || !font) return;
     SDL_Surface* ks = TTF_RenderUTF8_Blended(font, (std::string(key)+": ").c_str(), key_color);
     int keyw=0,keyh=0; SDL_Texture* kt=nullptr;
     if (ks) { kt = SDL_CreateTextureFromSurface(renderer, ks);
@@ -491,9 +493,9 @@ void render_frame() {
                             break; }
                     }
                     if (sid >= 0 && g_textures) if (SDL_Texture* texi = g_textures->get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, texi, nullptr, &dst); ty += 36; }
-                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Item", iname);
-                    if (!idesc.empty()) ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Desc", idesc);
-                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Consumable", consume ? std::string("Yes") : std::string("No"));
+                    ui_draw_kv_line(tx, ty, lh, "Item", iname);
+                    if (!idesc.empty()) ui_draw_kv_line(tx, ty, lh, "Desc", idesc);
+                    ui_draw_kv_line(tx, ty, lh, "Consumable", consume ? std::string("Yes") : std::string("No"));
                 } else if (best_kind == PK::Gun) {
                     auto const& gg = state.ground_guns.data()[best_idx];
                     const GunInstance* gim = state.guns.get(gg.gun_vid);
@@ -502,35 +504,35 @@ void render_frame() {
                     if (gdp) {
                         int gun_sid = -1; if (!gdp->sprite.empty() && g_sprite_ids) gun_sid = g_sprite_ids->try_get(gdp->sprite);
                         if (gun_sid >= 0 && g_textures) if (SDL_Texture* texg = g_textures->get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, texg, nullptr, &dst); ty += 44; }
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Gun", gdp->name);
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Damage", std::to_string((int)std::lround(gdp->damage)));
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "RPM", std::to_string((int)std::lround(gdp->rpm)));
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Deviation", fmt2(gdp->deviation) + " deg");
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Pellets", std::to_string(gdp->pellets_per_shot));
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Recoil", fmt2(gdp->recoil));
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Control", fmt2(gdp->control));
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gdp->max_recoil_spread_deg)) + " deg");
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Reload/Eject", std::to_string((int)std::lround(gdp->reload_time * 1000.0f)) + "/" + std::to_string((int)std::lround(gdp->eject_time * 1000.0f)) + " ms");
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Jam", std::to_string((int)std::lround(gdp->jam_chance * 100.0f)) + " %");
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AR Center", fmt2(gdp->ar_pos) + " ±" + fmt2(gdp->ar_pos_variance));
-                        ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AR Size", fmt2(gdp->ar_size) + " ±" + fmt2(gdp->ar_size_variance));
+                        ui_draw_kv_line(tx, ty, lh, "Gun", gdp->name);
+                        ui_draw_kv_line(tx, ty, lh, "Damage", std::to_string((int)std::lround(gdp->damage)));
+                        ui_draw_kv_line(tx, ty, lh, "RPM", std::to_string((int)std::lround(gdp->rpm)));
+                        ui_draw_kv_line(tx, ty, lh, "Deviation", fmt2(gdp->deviation) + " deg");
+                        ui_draw_kv_line(tx, ty, lh, "Pellets", std::to_string(gdp->pellets_per_shot));
+                        ui_draw_kv_line(tx, ty, lh, "Recoil", fmt2(gdp->recoil));
+                        ui_draw_kv_line(tx, ty, lh, "Control", fmt2(gdp->control));
+                        ui_draw_kv_line(tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gdp->max_recoil_spread_deg)) + " deg");
+                        ui_draw_kv_line(tx, ty, lh, "Reload/Eject", std::to_string((int)std::lround(gdp->reload_time * 1000.0f)) + "/" + std::to_string((int)std::lround(gdp->eject_time * 1000.0f)) + " ms");
+                        ui_draw_kv_line(tx, ty, lh, "Jam", std::to_string((int)std::lround(gdp->jam_chance * 100.0f)) + " %");
+                        ui_draw_kv_line(tx, ty, lh, "AR Center", fmt2(gdp->ar_pos) + " ±" + fmt2(gdp->ar_pos_variance));
+                        ui_draw_kv_line(tx, ty, lh, "AR Size", fmt2(gdp->ar_size) + " ±" + fmt2(gdp->ar_size_variance));
                         if (gim && gim->ammo_type != 0) {
                             if (auto const* ad = g_lua_mgr->find_ammo(gim->ammo_type)) {
                                 int asid = (!ad->sprite.empty() && g_sprite_ids) ? g_sprite_ids->try_get(ad->sprite) : -1;
                                 if (asid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
                                 int apct = (int)std::lround(ad->armor_pen * 100.0f);
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Ammo", ad->name);
-                                if (!ad->desc.empty()) ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Desc", ad->desc);
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "DMG", fmt2(ad->damage_mult));
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AP", std::to_string(apct) + "%");
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Shield", fmt2(ad->shield_mult));
+                                ui_draw_kv_line(tx, ty, lh, "Ammo", ad->name);
+                                if (!ad->desc.empty()) ui_draw_kv_line(tx, ty, lh, "Desc", ad->desc);
+                                ui_draw_kv_line(tx, ty, lh, "DMG", fmt2(ad->damage_mult));
+                                ui_draw_kv_line(tx, ty, lh, "AP", std::to_string(apct) + "%");
+                                ui_draw_kv_line(tx, ty, lh, "Shield", fmt2(ad->shield_mult));
                                 if (ad->range_units > 0.0f) {
-                                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
-                                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
-                                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
+                                    ui_draw_kv_line(tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
+                                    ui_draw_kv_line(tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
+                                    ui_draw_kv_line(tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
                                 }
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
+                                ui_draw_kv_line(tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
+                                ui_draw_kv_line(tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
                             }
                         }
                     }
@@ -898,42 +900,42 @@ void render_frame() {
                 // Icon
                 if (!gd->sprite.empty() && g_sprite_ids) { int sid = g_sprite_ids->try_get(gd->sprite); if (sid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; } }
                 // Key stats
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Gun", gd->name);
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Damage", std::to_string((int)std::lround(gd->damage)));
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "RPM", std::to_string((int)std::lround(gd->rpm)));
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Deviation", fmt2(gd->deviation) + " deg");
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Pellets", std::to_string(gd->pellets_per_shot));
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gd->max_recoil_spread_deg)) + " deg");
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Reload", std::to_string((int)std::lround(gd->reload_time * 1000.0f)) + " ms");
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Eject", std::to_string((int)std::lround(gd->eject_time * 1000.0f)) + " ms");
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Jam", std::to_string((int)std::lround(gd->jam_chance * 100.0f)) + " %");
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AR Center", fmt2(gd->ar_pos) + " ±" + fmt2(gd->ar_pos_variance));
-                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AR Size", fmt2(gd->ar_size) + " ±" + fmt2(gd->ar_size_variance));
+                ui_draw_kv_line(tx, ty, lh, "Gun", gd->name);
+                ui_draw_kv_line(tx, ty, lh, "Damage", std::to_string((int)std::lround(gd->damage)));
+                ui_draw_kv_line(tx, ty, lh, "RPM", std::to_string((int)std::lround(gd->rpm)));
+                ui_draw_kv_line(tx, ty, lh, "Deviation", fmt2(gd->deviation) + " deg");
+                ui_draw_kv_line(tx, ty, lh, "Pellets", std::to_string(gd->pellets_per_shot));
+                ui_draw_kv_line(tx, ty, lh, "Recoil cap", std::to_string((int)std::lround(gd->max_recoil_spread_deg)) + " deg");
+                ui_draw_kv_line(tx, ty, lh, "Reload", std::to_string((int)std::lround(gd->reload_time * 1000.0f)) + " ms");
+                ui_draw_kv_line(tx, ty, lh, "Eject", std::to_string((int)std::lround(gd->eject_time * 1000.0f)) + " ms");
+                ui_draw_kv_line(tx, ty, lh, "Jam", std::to_string((int)std::lround(gd->jam_chance * 100.0f)) + " %");
+                ui_draw_kv_line(tx, ty, lh, "AR Center", fmt2(gd->ar_pos) + " ±" + fmt2(gd->ar_pos_variance));
+                ui_draw_kv_line(tx, ty, lh, "AR Size", fmt2(gd->ar_size) + " ±" + fmt2(gd->ar_size_variance));
                 if (gd->rpm > 0.0f || gd->shot_interval > 0.0f) { float dt = gd->shot_interval > 0.0f ? gd->shot_interval : (60.0f / std::max(1.0f, gd->rpm)); int ms = (int)std::lround(dt * 1000.0f); draw_txt(std::string("Shot Time: ") + std::to_string(ms) + " ms", SDL_Color{220,220,220,255}); }
                 if (gd->fire_mode == std::string("burst") && (gd->burst_rpm > 0.0f || gd->burst_interval > 0.0f)) { draw_txt(std::string("Burst RPM: ") + std::to_string((int)std::lround(gd->burst_rpm)), SDL_Color{220,220,220,255}); float bdt = gd->burst_interval > 0.0f ? gd->burst_interval : (gd->burst_rpm > 0.0f ? 60.0f / gd->burst_rpm : 0.0f); if (bdt > 0.0f) { int bms = (int)std::lround(bdt * 1000.0f); draw_txt(std::string("Burst Time: ") + std::to_string(bms) + " ms", SDL_Color{220,220,220,255}); } }
                 // Fire mode label
                 { std::string fm_label = "Auto"; if (gd->fire_mode == "single") fm_label = "Semi"; else if (gd->fire_mode == "burst") fm_label = "Burst"; draw_txt(std::string("Mode: ") + fm_label, SDL_Color{220,220,220,255}); }
                 // Current mag/reserve
                 if (gi_inst) {
-                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Mag", std::to_string(gi_inst->current_mag));
-                    ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Reserve", std::to_string(gi_inst->ammo_reserve));
+                    ui_draw_kv_line(tx, ty, lh, "Mag", std::to_string(gi_inst->current_mag));
+                    ui_draw_kv_line(tx, ty, lh, "Reserve", std::to_string(gi_inst->ammo_reserve));
                     if (gi_inst->ammo_type != 0) {
                         if (auto const* ad = g_lua_mgr->find_ammo(gi_inst->ammo_type)) {
                             int asid = (!ad->sprite.empty() && g_sprite_ids) ? g_sprite_ids->try_get(ad->sprite) : -1;
                             if (asid >= 0 && g_textures) if (SDL_Texture* tex = g_textures->get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
                             int apct = (int)std::lround(ad->armor_pen * 100.0f);
-                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Ammo", ad->name);
-                            if (!ad->desc.empty()) ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Desc", ad->desc);
-                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "DMG", fmt2(ad->damage_mult));
-                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "AP", std::to_string(apct) + "%");
-                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Shield", fmt2(ad->shield_mult));
+                            ui_draw_kv_line(tx, ty, lh, "Ammo", ad->name);
+                            if (!ad->desc.empty()) ui_draw_kv_line(tx, ty, lh, "Desc", ad->desc);
+                            ui_draw_kv_line(tx, ty, lh, "DMG", fmt2(ad->damage_mult));
+                            ui_draw_kv_line(tx, ty, lh, "AP", std::to_string(apct) + "%");
+                            ui_draw_kv_line(tx, ty, lh, "Shield", fmt2(ad->shield_mult));
                             if (ad->range_units > 0.0f) {
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
-                                ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
+                                ui_draw_kv_line(tx, ty, lh, "Range", std::to_string((int)std::lround(ad->range_units)));
+                                ui_draw_kv_line(tx, ty, lh, "Falloff", std::to_string((int)std::lround(ad->falloff_start)) + "→" + std::to_string((int)std::lround(ad->falloff_end)));
+                                ui_draw_kv_line(tx, ty, lh, "Min Mult", fmt2(ad->falloff_min_mult));
                             }
-                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
-                            ui_draw_kv_line(renderer, gfx.ui_font, tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
+                            ui_draw_kv_line(tx, ty, lh, "Speed", std::to_string((int)std::lround(ad->speed)));
+                            ui_draw_kv_line(tx, ty, lh, "Pierce", std::to_string(ad->pierce_count));
                         }
                     }
                 }

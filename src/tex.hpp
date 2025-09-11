@@ -9,7 +9,8 @@
 class TextureStore {
   public:
     ~TextureStore();
-    bool load_all(SDL_Renderer* r, const SpriteStore& sprites);
+    // Loads textures using globals: g_gfx->renderer and *g_sprite_store
+    bool load_all();
     SDL_Texture* get(int sprite_id) const;
 
   private:

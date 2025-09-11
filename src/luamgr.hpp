@@ -164,11 +164,11 @@ class LuaManager {
     bool init();
     bool load_mods(const std::string& mods_root);
     // Trigger calls
-    bool call_item_on_use(int item_type, State& state, struct Entity& player, std::string* out_msg);
-    void call_item_on_tick(int item_type, State& state, struct Entity& player, float dt);
-    void call_item_on_shoot(int item_type, State& state, struct Entity& player);
-    void call_item_on_damage(int item_type, State& state, struct Entity& player, int attacker_ap);
-    void call_gun_on_jam(int gun_type, State& state, struct Entity& player);
+    bool call_item_on_use(int item_type, struct Entity& player, std::string* out_msg);
+    void call_item_on_tick(int item_type, struct Entity& player, float dt);
+    void call_item_on_shoot(int item_type, struct Entity& player);
+    void call_item_on_damage(int item_type, struct Entity& player, int attacker_ap);
+    void call_gun_on_jam(int gun_type, struct Entity& player);
     const ProjectileDef* find_projectile(int type) const {
         for (auto const& p : projectiles_)
             if (p.type == type)
@@ -183,43 +183,43 @@ class LuaManager {
     }
     void call_projectile_on_hit_entity(int proj_type);
     void call_projectile_on_hit_tile(int proj_type);
-    void call_crate_on_open(int crate_type, State& state, struct Entity& player);
+    void call_crate_on_open(int crate_type, struct Entity& player);
     // Ammo hook calls
     void call_ammo_on_hit(int ammo_type);
     void call_ammo_on_hit_entity(int ammo_type);
     void call_ammo_on_hit_tile(int ammo_type);
-    void call_on_dash(State& state, struct Entity& player);
-    void call_on_step(State& state, struct Entity* player);
-    void call_on_active_reload(State& state, struct Entity& player);
-    void call_gun_on_active_reload(int gun_type, State& state, struct Entity& player);
-    void call_item_on_active_reload(int item_type, State& state, struct Entity& player);
-    void call_on_failed_active_reload(State& state, struct Entity& player);
-    void call_gun_on_failed_active_reload(int gun_type, State& state, struct Entity& player);
-    void call_item_on_failed_active_reload(int item_type, State& state, struct Entity& player);
-    void call_on_tried_after_failed_ar(State& state, struct Entity& player);
-    void call_gun_on_tried_after_failed_ar(int gun_type, State& state, struct Entity& player);
-    void call_item_on_tried_after_failed_ar(int item_type, State& state, struct Entity& player);
-    void call_gun_on_step(int gun_type, State& state, struct Entity& player);
-    void call_gun_on_pickup(int gun_type, State& state, struct Entity& player);
-    void call_gun_on_drop(int gun_type, State& state, struct Entity& player);
-    void call_item_on_pickup(int item_type, State& state, struct Entity& player);
-    void call_item_on_drop(int item_type, State& state, struct Entity& player);
-    void call_on_eject(State& state, struct Entity& player);
-    void call_gun_on_eject(int gun_type, State& state, struct Entity& player);
-    void call_item_on_eject(int item_type, State& state, struct Entity& player);
-    void call_on_reload_start(State& state, struct Entity& player);
-    void call_gun_on_reload_start(int gun_type, State& state, struct Entity& player);
-    void call_item_on_reload_start(int item_type, State& state, struct Entity& player);
-    void call_on_reload_finish(State& state, struct Entity& player);
-    void call_gun_on_reload_finish(int gun_type, State& state, struct Entity& player);
-    void call_item_on_reload_finish(int item_type, State& state, struct Entity& player);
+    void call_on_dash(struct Entity& player);
+    void call_on_step(struct Entity* player);
+    void call_on_active_reload(struct Entity& player);
+    void call_gun_on_active_reload(int gun_type, struct Entity& player);
+    void call_item_on_active_reload(int item_type, struct Entity& player);
+    void call_on_failed_active_reload(struct Entity& player);
+    void call_gun_on_failed_active_reload(int gun_type, struct Entity& player);
+    void call_item_on_failed_active_reload(int item_type, struct Entity& player);
+    void call_on_tried_after_failed_ar(struct Entity& player);
+    void call_gun_on_tried_after_failed_ar(int gun_type, struct Entity& player);
+    void call_item_on_tried_after_failed_ar(int item_type, struct Entity& player);
+    void call_gun_on_step(int gun_type, struct Entity& player);
+    void call_gun_on_pickup(int gun_type, struct Entity& player);
+    void call_gun_on_drop(int gun_type, struct Entity& player);
+    void call_item_on_pickup(int item_type, struct Entity& player);
+    void call_item_on_drop(int item_type, struct Entity& player);
+    void call_on_eject(struct Entity& player);
+    void call_gun_on_eject(int gun_type, struct Entity& player);
+    void call_item_on_eject(int item_type, struct Entity& player);
+    void call_on_reload_start(struct Entity& player);
+    void call_gun_on_reload_start(int gun_type, struct Entity& player);
+    void call_item_on_reload_start(int item_type, struct Entity& player);
+    void call_on_reload_finish(struct Entity& player);
+    void call_gun_on_reload_finish(int gun_type, struct Entity& player);
+    void call_item_on_reload_finish(int item_type, struct Entity& player);
     const CrateDef* find_crate(int type) const {
         for (auto const& c : crates_)
             if (c.type == type)
                 return &c;
         return nullptr;
     }
-    void call_generate_room(State& state);
+    void call_generate_room();
 
     const std::vector<PowerupDef>& powerups() const {
         return powerups_;

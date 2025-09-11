@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
     TextureStore textures;
     g_textures = &textures;
     if (!arg_headless && gfx.renderer)
-        g_textures->load_all(gfx.renderer, *g_sprite_store);
+        g_textures->load_all();
     // Load sounds from mods/*/sounds/*.wav|*.ogg with key "mod:stem"
     {
         std::error_code ec;
@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE)
                 request_quit = true;
-            process_events(ev, ictx, request_quit);
+            process_events(ev, request_quit);
             if (ev.type == SDL_QUIT)
                 request_quit = true;
         }
@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
         state.dt = dt_sec;
         t_last = t_now;
 
-        build_inputs(binds, ictx, gfx);
+        build_inputs();
         // Age alerts and purge expired
         for (auto& al : state.alerts) {
             al.age += static_cast<float>(dt_sec);
@@ -226,7 +226,7 @@ int main(int argc, char** argv) {
             sim_pre_physics_ticks();
 
             // Movement + physics: player controlled + NPC wander; keep inside non-block tiles
-            sim_move_and_collide(gfx);
+            sim_move_and_collide();
 
             // Shield regeneration after delay (3s no damage), global step, and active reload
             // progress/completion
@@ -494,15 +494,15 @@ int main(int argc, char** argv) {
                                         }
                                         // Hooks: global, gun, items
                                         if (g_lua_mgr) {
-                                            g_lua_mgr->call_on_active_reload(state, *plm);
+                                            g_lua_mgr->call_on_active_reload(*plm);
                                             g_lua_mgr->call_gun_on_active_reload(gim->def_type,
-                                                                                 state, *plm);
+                                                                                 *plm);
                                             for (const auto& entry : state.inventory.entries) {
                                                 if (entry.kind == INV_ITEM) {
                                                     if (const ItemInstance* inst =
                                                             state.items.get(entry.vid)) {
                                                         g_lua_mgr->call_item_on_active_reload(
-                                                            inst->def_type, state, *plm);
+                                                            inst->def_type, *plm);
                                                     }
                                                 }
                                             }
@@ -521,15 +521,15 @@ int main(int argc, char** argv) {
                                                 pm->active_reload_fail += 1;
                                         }
                                         if (g_lua_mgr) {
-                                            g_lua_mgr->call_on_failed_active_reload(state, *plm);
+                                            g_lua_mgr->call_on_failed_active_reload(*plm);
                                             g_lua_mgr->call_gun_on_failed_active_reload(
-                                                gim->def_type, state, *plm);
+                                                gim->def_type, *plm);
                                             for (const auto& entry : state.inventory.entries) {
                                                 if (entry.kind == INV_ITEM) {
                                                     if (const ItemInstance* inst =
                                                             state.items.get(entry.vid)) {
                                                         g_lua_mgr->call_item_on_failed_active_reload(
-                                                            inst->def_type, state, *plm);
+                                                            inst->def_type, *plm);
                                                     }
                                                 }
                                             }
@@ -537,15 +537,15 @@ int main(int argc, char** argv) {
                                     } else if (gim->ar_consumed && gim->ar_failed_attempt) {
                                         // Already failed this reload; notify hook when trying again
                                         if (g_lua_mgr) {
-                                            g_lua_mgr->call_on_tried_after_failed_ar(state, *plm);
+                                            g_lua_mgr->call_on_tried_after_failed_ar(*plm);
                                             g_lua_mgr->call_gun_on_tried_after_failed_ar(
-                                                gim->def_type, state, *plm);
+                                                gim->def_type, *plm);
                                             for (const auto& entry : state.inventory.entries) {
                                                 if (entry.kind == INV_ITEM) {
                                                     if (const ItemInstance* inst =
                                                             state.items.get(entry.vid)) {
                                                         g_lua_mgr->call_item_on_tried_after_failed_ar(
-                                                            inst->def_type, state, *plm);
+                                                            inst->def_type, *plm);
                                                     }
                                                 }
                                             }
@@ -767,7 +767,7 @@ int main(int argc, char** argv) {
                                     gim->unjam_progress = 0.0f;
                                     fired = false;
                             if (g_lua_mgr)
-                                g_lua_mgr->call_gun_on_jam(gim->def_type, state, *plm);
+                                g_lua_mgr->call_gun_on_jam(gim->def_type, *plm);
                             if (g_audio) g_audio->sounds.play(gd->sound_jam.empty() ? "base:ui_cant"
                                                                       : gd->sound_jam);
                             state.alerts.push_back(
@@ -905,7 +905,7 @@ int main(int argc, char** argv) {
                             for (const auto& entry : state.inventory.entries) {
                                 if (entry.kind == INV_ITEM) {
                                     if (const ItemInstance* inst = state.items.get(entry.vid)) {
-                                        g_lua_mgr->call_item_on_shoot(inst->def_type, state, *plm);
+                                        g_lua_mgr->call_item_on_shoot(inst->def_type, *plm);
                                     }
                                 }
                             }
@@ -1043,7 +1043,7 @@ int main(int argc, char** argv) {
                         gi->tick_acc += dt;
                         float period = 1.0f / std::max(1.0f, gd->tick_rate_hz);
                         while (gi->tick_acc >= period && tick_calls < MAX_TICKS) {
-                            g_lua_mgr->call_gun_on_step(gi->def_type, state, *plat);
+                            g_lua_mgr->call_gun_on_step(gi->def_type, *plat);
                             gi->tick_acc -= period;
                             ++tick_calls;
                         }
@@ -1068,7 +1068,7 @@ int main(int argc, char** argv) {
                         inst->tick_acc += dt;
                         float period = 1.0f / std::max(1.0f, idf->tick_rate_hz);
                         while (inst->tick_acc >= period && tick_calls < MAX_TICKS) {
-                            g_lua_mgr->call_item_on_tick(inst->def_type, state, *plat, period);
+                            g_lua_mgr->call_item_on_tick(inst->def_type, *plat, period);
                             inst->tick_acc -= period;
                             ++tick_calls;
                         }

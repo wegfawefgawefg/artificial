@@ -28,6 +28,7 @@ struct InputContext {
     float wheel_delta{0.0f};
 };
 
-void process_events(SDL_Event& ev, InputContext& ctx, bool& request_quit);
-void build_inputs(const InputBindings& bind, const InputContext& ctx, Graphics& gfx);
-void process_input_per_mode(Graphics& gfx);
+void process_events(SDL_Event& ev, bool& request_quit);
+// Reads from globals: g_binds, g_input, g_state, g_gfx
+void build_inputs();
+void process_input_per_mode();

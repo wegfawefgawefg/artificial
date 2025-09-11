@@ -8,7 +8,7 @@
 void sim_pre_physics_ticks();
 
 // Player/NPC movement, dash, per-axis tile collision, movement spread.
-void sim_move_and_collide(Graphics& gfx);
+void sim_move_and_collide();
 
 // Shield regen and active reload progress/completion on equipped gun.
 void sim_shield_and_reload();

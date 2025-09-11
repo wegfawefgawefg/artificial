@@ -157,7 +157,7 @@ void generate_room() {
     {
         glm::vec2 base = {static_cast<float>(state.start_tile.x) + 0.5f,
                           static_cast<float>(state.start_tile.y) + 0.5f};
-        auto place = [&](glm::vec2 offs) { return ensure_not_in_block(state, base + offs); };
+        auto place = [&](glm::vec2 offs) { return ensure_not_in_block(base + offs); };
         if (g_lua_mgr && !g_lua_mgr->powerups().empty()) {
             auto& pu = g_lua_mgr->powerups()[0];
             auto* p = state.pickups.spawn(static_cast<std::uint32_t>(pu.type), pu.name,
@@ -230,16 +230,17 @@ void generate_room() {
         }
         // Let Lua generate room content (crates, loot, etc.) if function is present
         if (g_lua_mgr)
-            g_lua_mgr->call_generate_room(state);
+            g_lua_mgr->call_generate_room();
     }
 }
 
-bool tile_blocks_entity(const State& state, int x, int y) {
+bool tile_blocks_entity(int x, int y) {
+    auto& state = *g_state;
     return !state.stage.in_bounds(x, y) || state.stage.at(x, y).blocks_entities();
 }
 
-glm::ivec2 nearest_walkable_tile(const State& state, glm::ivec2 t, int max_radius) {
-    if (!tile_blocks_entity(state, t.x, t.y))
+glm::ivec2 nearest_walkable_tile(glm::ivec2 t, int max_radius) {
+    if (!tile_blocks_entity(t.x, t.y))
         return t;
     for (int r = 1; r <= max_radius; ++r) {
         for (int dy = -r; dy <= r; ++dy) {
@@ -247,7 +248,7 @@ glm::ivec2 nearest_walkable_tile(const State& state, glm::ivec2 t, int max_radiu
             int dx = r - std::abs(dy);
             for (int sx : {-dx, dx}) {
                 int x = t.x + sx;
-                if (!tile_blocks_entity(state, x, y))
+                if (!tile_blocks_entity(x, y))
                     return {x, y};
             }
         }
@@ -255,9 +256,9 @@ glm::ivec2 nearest_walkable_tile(const State& state, glm::ivec2 t, int max_radiu
     return t;
 }
 
-glm::vec2 ensure_not_in_block(const State& state, glm::vec2 pos) {
+glm::vec2 ensure_not_in_block(glm::vec2 pos) {
     glm::ivec2 t = {static_cast<int>(std::floor(pos.x)), static_cast<int>(std::floor(pos.y))};
-    glm::ivec2 w = nearest_walkable_tile(state, t, 16);
+    glm::ivec2 w = nearest_walkable_tile(t, 16);
     if (w != t)
         return glm::vec2{(float)w.x + 0.5f, (float)w.y + 0.5f};
     return pos;
