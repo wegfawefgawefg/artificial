@@ -23,10 +23,9 @@ Next steps (to finish before removing logic from main)
 
 Testing
 - Build: `cmake -S . -B build && cmake --build build -j`
-- Headless smoke: `./build/gub --headless --frames=1`
+- Headless smoke: `./build/artificial --headless --frames=1` (alias: `./build/arti`)
 - Manual run to verify gameplay and ensure no behavior regressions.
 
 Notes
 - No rendering will move into `sim_step()`; all rendering remains in `render_frame()`.
 - Keep CLI args behavior (`--headless`, `--frames`) unchanged.
-

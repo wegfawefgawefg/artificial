@@ -20,9 +20,9 @@
       "dependsOn": ["cmake: configure (dev)"]
     },
     {
-      "label": "run gub",
+      "label": "run artificial",
       "type": "shell",
-      "command": "${workspaceFolder}/build/gub",
+      "command": "${workspaceFolder}/build/artificial",
       "dependsOn": ["cmake: build (dev)"],
       "options": {
         "env": {

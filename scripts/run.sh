@@ -11,4 +11,4 @@ if [ ! -d build ]; then
 fi
 
 cmake --build --preset dev -j
-"$(dirname "$0")"/../build/gub
+"$(dirname "$0")"/../build/artificial

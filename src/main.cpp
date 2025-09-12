@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    const char* title = "gub";
+    const char* title = "artificial";
     int width = 1280;
     int height = 720;
 
@@ -1125,7 +1125,7 @@ int main(int argc, char** argv) {
             accum_sec -= 1.0;
             title_buf.clear();
             title_buf.reserve(64);
-            title_buf = "gub - FPS: ";
+            title_buf = "artificial - FPS: ";
             // Convert FPS to string without iostreams to keep it light
             char tmp[32];
             std::snprintf(tmp, sizeof(tmp), "%d", last_fps);

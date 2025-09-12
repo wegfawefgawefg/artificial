@@ -1,4 +1,4 @@
-Gub Engine — Agent Guide
+Artificial (arti) — Agent Guide
 ========================
 
 Notes
@@ -19,7 +19,8 @@ Build + Run
 - Debian setup: bash scripts/setup_debian.sh
 - Configure: cmake -S . -B build
 - Build: cmake --build build -j
-- Run: ./build/gub (or bash scripts/run.sh)
+- Run: ./build/artificial (or bash scripts/run.sh)
+  - Alias symlink: ./build/arti
 - Strictness: Werror + -Wall -Wextra -Wpedantic etc enabled by default.
 
 Project Structure (flat under src/)

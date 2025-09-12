@@ -42,3 +42,26 @@ HUD/UX
 - [Done] Gun UI shows fire mode + burst cadence; content includes Burst Rifle.
 - [Done] Pickup UX: best-overlap selection; single prompt using active bind; F is the pickup key.
 - [Next] Minor tuning for dash sliver spacing/width; optional labels toggle (Shield/Plates/HP).
+
+Docs
+- Modding Guide: author a gamer-friendly how-to covering mod tree layout, Lua registration tables (guns, ammo, items, crates), naming conventions, and hot reload. Link it from README.
+
+Steam / Distribution
+- Steam Page Checklist: capsule art (all sizes), screenshots, trailer, description/features, tags, pricing, age rating, achievements (if any), depots/branches setup, store localization plan.
+- Steamworks Integration: overlays where relevant, rich presence, achievements (optional), Cloud (settings saves) — scope later.
+- Depots/Builds: CI artifacts for Windows and macOS; upload to Steam via build scripts.
+
+Multiplayer
+- Architecture Decision: pick approach (lockstep vs client/authoritative server). Prototype small sync testbed first.
+- Networking (Steam): Steam Networking Sockets + lobbies/matchmaking; invites and friend join flow.
+- Networking (Non‑Steam): ENet/UDP fallback with NAT traversal; compatible matchmaking directory.
+- Dedicated Server: headless build target + minimal server loop; Steam server listing + non‑Steam directory.
+- Friends: Steam friends presence and join/invite; session privacy controls.
+
+Platforms / Builds
+- Windows build: validated release profile + runtime deps; installer/zip packaging.
+- macOS build: validated release profile + codesigning/notarization plan (later).
+- Linux build: continue dev preset; add release preset when ready.
+
+Modifiers System
+- Status: planned/design‑ready; not yet started. Implement registry + stat pipeline + durations/stacking with hooks after core polish.

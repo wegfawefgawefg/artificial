@@ -2,10 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run gub (Debug)",
+      "name": "Run artificial (Debug)",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/gub",
+      "program": "${workspaceFolder}/build/artificial",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",

@@ -1,6 +1,9 @@
 #include "sim.hpp"
 
 #include "globals.hpp"
+#include "graphics.hpp"
+#include "input_system.hpp"
+#include "runtime_settings.hpp"
 #include "luamgr.hpp"
 #include "settings.hpp"
 #include "room.hpp"
@@ -77,6 +80,7 @@ void sim_pre_physics_ticks() {
         }
     }
 }
+
 
 void sim_move_and_collide() {
     auto& state = *g_state;
@@ -465,13 +469,13 @@ void sim_step() {
 
         // Exit countdown and transitions
         if (state.mode == ids::MODE_PLAYING) {
-            const Entity* p = (state.player_vid ? state.entities.get(*state.player_vid) : nullptr);
-            if (p) {
-                glm::vec2 half = p->half_size();
-                float left = p->pos.x - half.x;
-                float right = p->pos.x + half.x;
-                float top = p->pos.y - half.y;
-                float bottom = p->pos.y + half.y;
+            const Entity* player_e = (state.player_vid ? state.entities.get(*state.player_vid) : nullptr);
+            if (player_e) {
+                glm::vec2 half = player_e->half_size();
+                float left = player_e->pos.x - half.x;
+                float right = player_e->pos.x + half.x;
+                float top = player_e->pos.y - half.y;
+                float bottom = player_e->pos.y + half.y;
                 float exl = (float)state.exit_tile.x, exr = exl + 1.0f;
                 float ext = (float)state.exit_tile.y, exb = ext + 1.0f;
                 bool overlaps = !(right <= exl || left >= exr || bottom <= ext || top >= exb);
@@ -571,19 +575,19 @@ void sim_step() {
             // Camera follow
             if (state.player_vid && g_gfx) {
                 auto& gfx = *g_gfx;
-                const Entity* p = state.entities.get(*state.player_vid);
-                if (p) {
+                const Entity* player_cam = state.entities.get(*state.player_vid);
+                if (player_cam) {
                     int ww = 0, wh = 0; if (gfx.renderer) SDL_GetRendererOutputSize(gfx.renderer, &ww, &wh);
                     float zx = gfx.play_cam.zoom;
                     float sx = (float)state.mouse_inputs.pos.x, sy = (float)state.mouse_inputs.pos.y;
-                    glm::vec2 mouse_world = p->pos;
+                    glm::vec2 mouse_world = player_cam->pos;
                     float inv_scale = 1.0f / (TILE_SIZE * zx);
                     mouse_world.x = gfx.play_cam.pos.x + (sx - (float)ww * 0.5f) * inv_scale;
                     mouse_world.y = gfx.play_cam.pos.y + (sy - (float)wh * 0.5f) * inv_scale;
-                    glm::vec2 target = p->pos;
+                    glm::vec2 target = player_cam->pos;
                     if (state.camera_follow_enabled) {
                         float cff = g_settings ? g_settings->camera_follow_factor : CAMERA_FOLLOW_FACTOR;
-                        target = p->pos + (mouse_world - p->pos) * cff;
+                        target = player_cam->pos + (mouse_world - player_cam->pos) * cff;
                     }
                     gfx.play_cam.pos = target;
                 }
@@ -689,12 +693,13 @@ void sim_step() {
                 } else fire_request = false;
             } else { fire_request = trig_held; }
             if (state.mode == ids::MODE_PLAYING && state.input_lockout_timer == 0.0f && fire_request && can_fire) {
-                glm::vec2 p = state.player_vid ? state.entities.get(*state.player_vid)->pos : glm::vec2{(float)state.stage.get_width()/2.0f,(float)state.stage.get_height()/2.0f};
+                glm::vec2 ppos = state.player_vid ? state.entities.get(*state.player_vid)->pos : glm::vec2{(float)state.stage.get_width()/2.0f,(float)state.stage.get_height()/2.0f};
                 int ww = 0, wh = 0; if (g_gfx && g_gfx->renderer) SDL_GetRendererOutputSize(g_gfx->renderer, &ww, &wh);
                 float inv_scale = 1.0f / (TILE_SIZE * g_gfx->play_cam.zoom);
                 glm::vec2 m = {g_gfx->play_cam.pos.x + ((float)state.mouse_inputs.pos.x - (float)ww * 0.5f) * inv_scale,
                                g_gfx->play_cam.pos.y + ((float)state.mouse_inputs.pos.y - (float)wh * 0.5f) * inv_scale};
-                glm::vec2 aim = glm::normalize(m - p); glm::vec2 dir = glm::any(glm::isnan(aim)) ? glm::vec2{1.0f,0.0f} : aim;
+                glm::vec2 aim = glm::normalize(m - ppos);
+                glm::vec2 dir = glm::any(glm::isnan(aim)) ? glm::vec2{1.0f,0.0f} : aim;
                 float rpm = 600.0f; bool fired = true; int proj_type = 0; float proj_speed = 20.0f; glm::vec2 proj_size{0.2f,0.2f}; int proj_steps = 2; int proj_sprite_id = -1; int ammo_type = 0;
                 if (state.player_vid) {
                     auto* plm = state.entities.get_mut(*state.player_vid);
@@ -712,7 +717,16 @@ void sim_step() {
                             ammo_type = gi->ammo_type;
                             if (g_lua_mgr && ammo_type != 0) {
                                 if (auto const* ad = g_lua_mgr->find_ammo(ammo_type)) {
-                                    if (ad->speed > 0.0f) proj_speed = ad->speed; proj_size = {ad->size_x, ad->size_y}; if (!ad->sprite.empty() && ad->sprite.find(':') != std::string::npos && g_sprite_ids) { int s = g_sprite_ids->try_get(ad->sprite); if (s>=0) proj_sprite_id = s; }
+                                    if (ad->speed > 0.0f) {
+                                        proj_speed = ad->speed;
+                                    }
+                                    proj_size = {ad->size_x, ad->size_y};
+                                    if (!ad->sprite.empty() && ad->sprite.find(':') != std::string::npos && g_sprite_ids) {
+                                        int s = g_sprite_ids->try_get(ad->sprite);
+                                        if (s >= 0) {
+                                            proj_sprite_id = s;
+                                        }
+                                    }
                                 }
                             }
                             // consume ammo and jam chance handled below
@@ -758,9 +772,43 @@ void sim_step() {
                     for (int i = 0; i < pellets; ++i) {
                         float phi = Uphi2(rng_theta2) * 3.14159265358979323846f / 180.0f; float cs = std::cos(phi), sn = std::sin(phi);
                         glm::vec2 pdir{aim.x * cs - aim.y * sn, aim.x * sn + aim.y * cs}; pdir = glm::normalize(pdir);
-                        glm::vec2 sp = p + pdir * GUN_MUZZLE_OFFSET_UNITS;
+                        glm::vec2 sp = ppos + pdir * GUN_MUZZLE_OFFSET_UNITS;
                         auto* pr = g_state ? g_state->projectiles.spawn(sp, pdir * proj_speed, proj_size, proj_steps, proj_type) : nullptr;
-                        if (pr && state.player_vid) pr->owner = state.player_vid; if (pr) { pr->sprite_id = proj_sprite_id; pr->ammo_type = ammo_type; float base_dmg = 1.0f; if (g_lua_mgr && state.player_vid) { if (auto* plmm = state.entities.get_mut(*state.player_vid)) { if (plmm->equipped_gun_vid.has_value()) { if (const GunInstance* gi2 = state.guns.get(*plmm->equipped_gun_vid)) { const GunDef* gd2 = nullptr; for (auto const& g : g_lua_mgr->guns()) if (g.type == gi2->def_type) { gd2 = &g; break; } if (gd2) base_dmg = gd2->damage; } } } } float dmg_mult=1.0f, armor_pen=0.0f, shield_mult=1.0f, range_units=0.0f; if (g_lua_mgr && ammo_type != 0) { if (auto const* ad = g_lua_mgr->find_ammo(ammo_type)) { dmg_mult = ad->damage_mult; armor_pen = ad->armor_pen; shield_mult = ad->shield_mult; range_units = ad->range_units; if (pr) pr->pierce_remaining = std::max(0, ad->pierce_count); } } pr->base_damage = base_dmg * dmg_mult; pr->armor_pen = armor_pen; pr->shield_mult = shield_mult; pr->max_range_units = range_units; (void)pr; }
+                        if (pr && state.player_vid) {
+                            pr->owner = state.player_vid;
+                        }
+                        if (pr) {
+                            pr->sprite_id = proj_sprite_id;
+                            pr->ammo_type = ammo_type;
+                            float base_dmg = 1.0f;
+                            if (g_lua_mgr && state.player_vid) {
+                                if (auto* plmm = state.entities.get_mut(*state.player_vid)) {
+                                    if (plmm->equipped_gun_vid.has_value()) {
+                                        if (const GunInstance* gi2 = state.guns.get(*plmm->equipped_gun_vid)) {
+                                            const GunDef* gd2 = nullptr;
+                                            for (auto const& g : g_lua_mgr->guns())
+                                                if (g.type == gi2->def_type) { gd2 = &g; break; }
+                                            if (gd2) base_dmg = gd2->damage;
+                                        }
+                                    }
+                                }
+                            }
+                            float dmg_mult = 1.0f, armor_pen = 0.0f, shield_mult = 1.0f, range_units = 0.0f;
+                            if (g_lua_mgr && ammo_type != 0) {
+                                if (auto const* ad = g_lua_mgr->find_ammo(ammo_type)) {
+                                    dmg_mult = ad->damage_mult;
+                                    armor_pen = ad->armor_pen;
+                                    shield_mult = ad->shield_mult;
+                                    range_units = ad->range_units;
+                                    pr->pierce_remaining = std::max(0, ad->pierce_count);
+                                }
+                            }
+                            pr->base_damage = base_dmg * dmg_mult;
+                            pr->armor_pen = armor_pen;
+                            pr->shield_mult = shield_mult;
+                            pr->max_range_units = range_units;
+                            (void)pr;
+                        }
                     if (state.player_vid) { auto* plm = state.entities.get_mut(*state.player_vid); if (plm && plm->equipped_gun_vid.has_value()) { const GunInstance* gi = state.guns.get(*plm->equipped_gun_vid); const GunDef* gd = nullptr; if (g_lua_mgr && gi) { for (auto const& g : g_lua_mgr->guns()) if (g.type == gi->def_type) { gd = &g; break; } } if (g_audio) g_audio->sounds.play((gd && !gd->sound_fire.empty()) ? gd->sound_fire : "base:small_shoot"); } else { if (g_audio) g_audio->sounds.play("base:small_shoot"); } } else { if (g_audio) g_audio->sounds.play("base:small_shoot"); }
                     if (g_lua_mgr && state.player_vid) { auto* plm = state.entities.get_mut(*state.player_vid); if (plm) { for (const auto& entry : state.inventory.entries) { if (entry.kind == INV_ITEM) { if (const ItemInstance* inst = state.items.get(entry.vid)) { g_lua_mgr->call_item_on_shoot(inst->def_type, *plm); } } } } }
                     if (state.player_vid && fire_mode == "burst" && burst_step && burst_rpm > 0.0f) { state.gun_cooldown = std::max(0.01f, 60.0f / burst_rpm); auto* plm2 = state.entities.get_mut(*state.player_vid); if (plm2 && plm2->equipped_gun_vid.has_value()) { if (auto* gim2 = state.guns.get(*plm2->equipped_gun_vid)) { gim2->burst_remaining = std::max(0, gim2->burst_remaining - 1); gim2->burst_timer = state.gun_cooldown; } } }
@@ -779,18 +827,46 @@ void sim_step() {
                     const float dt = TIMESTEP;
                     const int MAX_TICKS = 4000; int tick_calls = 0;
                     for (const auto& entry : state.inventory.entries) {
-                        if (entry.kind != INV_GUN) continue; GunInstance* gi = state.guns.get(entry.vid); if (!gi) continue;
-                        const GunDef* gd = nullptr; for (auto const& g : g_lua_mgr->guns()) if (g.type == gi->def_type) { gd = &g; break; }
-                        if (!gd || gd->on_step_ref < 0) continue; if (gd->tick_rate_hz <= 0.0f || gd->tick_phase == "before") continue;
-                        gi->tick_acc += dt; float period = 1.0f / std::max(1.0f, gd->tick_rate_hz);
-                        while (gi->tick_acc >= period && tick_calls < MAX_TICKS) { g_lua_mgr->call_gun_on_step(gi->def_type, *plat); gi->tick_acc -= period; ++tick_calls; }
+                        if (entry.kind != INV_GUN)
+                            continue;
+                        GunInstance* gi = state.guns.get(entry.vid);
+                        if (!gi)
+                            continue;
+                        const GunDef* gd = nullptr;
+                        for (auto const& g : g_lua_mgr->guns())
+                            if (g.type == gi->def_type) { gd = &g; break; }
+                        if (!gd || gd->on_step_ref < 0)
+                            continue;
+                        if (gd->tick_rate_hz <= 0.0f || gd->tick_phase == "before")
+                            continue;
+                        gi->tick_acc += dt;
+                        float period = 1.0f / std::max(1.0f, gd->tick_rate_hz);
+                        while (gi->tick_acc >= period && tick_calls < MAX_TICKS) {
+                            g_lua_mgr->call_gun_on_step(gi->def_type, *plat);
+                            gi->tick_acc -= period;
+                            ++tick_calls;
+                        }
                     }
                     for (const auto& entry : state.inventory.entries) {
-                        if (entry.kind != INV_ITEM) continue; ItemInstance* inst = state.items.get(entry.vid); if (!inst) continue;
-                        const ItemDef* idf = nullptr; for (auto const& d : g_lua_mgr->items()) if (d.type == inst->def_type) { idf = &d; break; }
-                        if (!idf || idf->on_tick_ref < 0) continue; if (idf->tick_rate_hz <= 0.0f || idf->tick_phase == "before") continue;
-                        inst->tick_acc += dt; float period = 1.0f / std::max(1.0f, idf->tick_rate_hz);
-                        while (inst->tick_acc >= period && tick_calls < MAX_TICKS) { g_lua_mgr->call_item_on_tick(inst->def_type, *plat, period); inst->tick_acc -= period; ++tick_calls; }
+                        if (entry.kind != INV_ITEM)
+                            continue;
+                        ItemInstance* inst = state.items.get(entry.vid);
+                        if (!inst)
+                            continue;
+                        const ItemDef* idf = nullptr;
+                        for (auto const& d : g_lua_mgr->items())
+                            if (d.type == inst->def_type) { idf = &d; break; }
+                        if (!idf || idf->on_tick_ref < 0)
+                            continue;
+                        if (idf->tick_rate_hz <= 0.0f || idf->tick_phase == "before")
+                            continue;
+                        inst->tick_acc += dt;
+                        float period = 1.0f / std::max(1.0f, idf->tick_rate_hz);
+                        while (inst->tick_acc >= period && tick_calls < MAX_TICKS) {
+                            g_lua_mgr->call_item_on_tick(inst->def_type, *plat, period);
+                            inst->tick_acc -= period;
+                            ++tick_calls;
+                        }
                     }
                 }
             }
@@ -814,6 +890,7 @@ void sim_step() {
         // Crate open progression
         sim_update_crates_open();
     }
+}
 }
 
 void sim_ground_repulsion() {

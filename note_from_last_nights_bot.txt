@@ -96,7 +96,7 @@ I need to mention the ammo hooks in my updates. I’ll start by updating docs/ag
 
 
 ✏️ Applying patch to 1 file (+27 -4)
-  └ /home/vega/Coding/GameDev/gub/docs/stats_and_triggers.md
+  └ /home/vega/Coding/GameDev/artificial/docs/stats_and_triggers.md
     72     - on_failed_active_reload(): optional callback for failing the active window.
     73    -- on_tried_to_active_reload_after_failing(): optional callback when pressing reload again after failing during the same reload.
     74    -- on_eject(), on_reload_start(), on_reload_finish(): optional lifecycle callbacks.
@@ -135,7 +135,7 @@ I need to mention the ammo hooks in my updates. I’ll start by updating docs/ag
   └ 📖 agent_guide.txt
 
 ✏️ Applying patch to 1 file (+6 -2)
-  └ /home/vega/Coding/GameDev/gub/docs/agent_guide.txt
+  └ /home/vega/Coding/GameDev/artificial/docs/agent_guide.txt
     48     - Input remap: Reads config/input.ini (key=value). Pickup key default is F (legacy E still works).
     49    -- UI: Pickup prompt when overlapping; inventory panel with hotkeys 1–0 and item details; basic gun equip/use logic.
     49    +- UI: Pickup prompt when overlapping; inventory panel with hotkeys 1–0 and drag‑and‑drop reordering; basic gun equip/use logic.
@@ -165,7 +165,7 @@ gun
   └ 📖 done.txt
 
 ✏️ Applying patch to 1 file (+12 -0)
-  └ /home/vega/Coding/GameDev/gub/docs/done.txt
+  └ /home/vega/Coding/GameDev/artificial/docs/done.txt
     71     - UX: pickup debounce (setting) and best-overlap; cross-spacing for ground items/guns; push away from crates.
     73    +Session: Ammo System, Panels, Inventory UX
     74    +- Ammo types: Added `register_ammo{ name,type,desc,sprite,size_x,size_y,speed,damage_mult,armor_pen,shield_mult,range,falloff_start

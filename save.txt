@@ -156,6 +156,6 @@ countdown.
 Build/run
 
 - Build: cmake -S . -B build && cmake --build build -j
-- Headless smoke: ./build/gub --headless --frames=1
+- Headless smoke: ./build/artificial --headless --frames=1 (alias: ./build/arti)
 
 All notes are in docs/working_now.md for quick handoff.
