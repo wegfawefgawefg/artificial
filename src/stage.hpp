@@ -20,43 +20,43 @@ struct TileProps {
     }
 };
 
-class Stage {
+struct Stage {
   public:
-    Stage(std::uint32_t w = 64, std::uint32_t h = 36) : width(w), height(h) {
+    Stage(uint32_t w = 64, uint32_t h = 36) : width(w), height(h) {
         tiles.resize(width * height);
     }
 
-    std::uint32_t get_width() const {
+    uint32_t get_width() const {
         return width;
     }
-    std::uint32_t get_height() const {
+    uint32_t get_height() const {
         return height;
     }
 
     bool in_bounds(int x, int y) const {
-        return x >= 0 && y >= 0 && (std::uint32_t)x < width && (std::uint32_t)y < height;
+        return x >= 0 && y >= 0 && (uint32_t)x < width && (uint32_t)y < height;
     }
 
     TileProps& at(int x, int y) {
-        return tiles[(std::uint32_t)y * width + (std::uint32_t)x];
+        return tiles[(uint32_t)y * width + (uint32_t)x];
     }
     const TileProps& at(int x, int y) const {
-        return tiles[(std::uint32_t)y * width + (std::uint32_t)x];
+        return tiles[(uint32_t)y * width + (uint32_t)x];
     }
 
     void fill_border(TileProps t) {
-        for (std::uint32_t x = 0; x < width; ++x) {
+        for (uint32_t x = 0; x < width; ++x) {
             at((int)x, 0) = t;
             at((int)x, (int)height - 1) = t;
         }
-        for (std::uint32_t y = 0; y < height; ++y) {
+        for (uint32_t y = 0; y < height; ++y) {
             at(0, (int)y) = t;
             at((int)width - 1, (int)y) = t;
         }
     }
 
   private:
-    std::uint32_t width;
-    std::uint32_t height;
+    uint32_t width;
+    uint32_t height;
     std::vector<TileProps> tiles;
 };

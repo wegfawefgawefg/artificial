@@ -3,7 +3,7 @@
 #include "crates.hpp"
 #include "entities.hpp"
 #include "guns.hpp"
-#include "inputs.hpp"
+#include "input.hpp"
 #include "inventory.hpp"
 #include "items.hpp"
 #include "particles.hpp"
@@ -11,6 +11,7 @@
 #include "projectiles.hpp"
 #include "stage.hpp"
 #include "types.hpp"
+#include "runtime_settings.hpp"
 
 #include <cstdint>
 #include <glm/glm.hpp>
@@ -18,31 +19,40 @@
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include "input_defs.hpp"
 
 struct State {
-    // Frame delta (seconds), updated each frame in main loop
-    double dt{0.0};
-    int mode{ids::MODE_TITLE};
-    bool mouse_mode{true};
-    MouseInputs mouse_inputs = MouseInputs::make();
-    MenuInputs menu_inputs = MenuInputs::make();
-    MenuInputDebounceTimers menu_input_debounce_timers = MenuInputDebounceTimers::make();
-    PlayingInputs playing_inputs = PlayingInputs::make();
-    PlayingInputDebounceTimers playing_input_debounce_timers = PlayingInputDebounceTimers::make();
-
     bool running{true};
+    int mode{ids::MODE_TITLE};
+
+    // Time
     double now{0.0};
+    float dt{0.0}; // in seconds
     float time_since_last_update{0.0f};
-    std::uint32_t scene_frame{0};
-    std::uint32_t frame{0};
+    uint32_t scene_frame{0};
+    uint32_t frame{0};
+
+    // Input
+    bool mouse_mode{true};
+    MouseInputs mouse_inputs = MouseInputs{};
+    MenuInputs menu_inputs = MenuInputs{};
+    MenuInputDebounceTimers menu_input_debounce_timers = MenuInputDebounceTimers{};
+    PlayingInputs playing_inputs = PlayingInputs{};
+    PlayingInputDebounceTimers playing_input_debounce_timers = PlayingInputDebounceTimers{};
+
+    InputState input_state = InputState{};
+    InputBindings input_binds = InputBindings{};
+
+    Settings settings;
+
 
     bool game_over{false};
     bool pause{false};
     bool win{false};
-
-    std::uint32_t points{0};
-    std::uint32_t deaths{0};
-    std::uint32_t frame_pause{0};
+    
+    uint32_t points{0};
+    uint32_t deaths{0};
+    uint32_t frame_pause{0};
 
     Entities entities{};
     std::optional<VID> player_vid{};
@@ -122,46 +132,46 @@ struct State {
     // Metrics (per-stage). Designed for multi-player: per-player metrics keyed by entity slots.
     struct PlayerMetrics {
         bool active{false};
-        std::uint32_t version{0}; // to validate VID
+        uint32_t version{0}; // to validate VID
         // Combat/accuracy
-        std::uint32_t shots_fired{0};
-        std::uint32_t shots_hit{0};
-        std::uint32_t enemies_slain{0};
+        uint32_t shots_fired{0};
+        uint32_t shots_hit{0};
+        uint32_t enemies_slain{0};
         // Reloads
-        std::uint32_t reloads{0};
-        std::uint32_t active_reload_success{0};
-        std::uint32_t active_reload_fail{0};
+        uint32_t reloads{0};
+        uint32_t active_reload_success{0};
+        uint32_t active_reload_fail{0};
         // Jams
-        std::uint32_t jams{0};
-        std::uint32_t unjam_mashes{0};
+        uint32_t jams{0};
+        uint32_t unjam_mashes{0};
         // Damage
         std::uint64_t damage_dealt{0};
         std::uint64_t damage_taken_hp{0};
         std::uint64_t damage_taken_shield{0};
-        std::uint32_t plates_gained{0};
-        std::uint32_t plates_consumed{0};
+        uint32_t plates_gained{0};
+        uint32_t plates_consumed{0};
         // Mobility
-        std::uint32_t dashes_used{0};
+        uint32_t dashes_used{0};
         float dash_distance{0.0f};
         // Loot
-        std::uint32_t powerups_picked{0};
-        std::uint32_t items_picked{0};
-        std::uint32_t guns_picked{0};
-        std::uint32_t items_dropped{0};
-        std::uint32_t guns_dropped{0};
+        uint32_t powerups_picked{0};
+        uint32_t items_picked{0};
+        uint32_t guns_picked{0};
+        uint32_t items_dropped{0};
+        uint32_t guns_dropped{0};
     };
 
     struct StageMetrics {
         // Global
         float time_in_stage{0.0f};
-        std::uint32_t enemies_slain{0};
-        std::unordered_map<int, std::uint32_t> enemies_slain_by_type;
-        std::uint32_t crates_opened{0};
+        uint32_t enemies_slain{0};
+        std::unordered_map<int, uint32_t> enemies_slain_by_type;
+        uint32_t crates_opened{0};
         // Totals for missed calculations (optional to fill at generation time)
-        std::uint32_t crates_spawned{0};
-        std::uint32_t powerups_spawned{0};
-        std::uint32_t items_spawned{0};
-        std::uint32_t guns_spawned{0};
+        uint32_t crates_spawned{0};
+        uint32_t powerups_spawned{0};
+        uint32_t items_spawned{0};
+        uint32_t guns_spawned{0};
         // Per-player array sized to Entities::MAX; index by VID.id, validate version
         std::vector<PlayerMetrics> per_player;
 
@@ -207,3 +217,5 @@ struct State {
         return &m;
     }
 };
+
+bool init_state();

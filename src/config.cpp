@@ -4,6 +4,7 @@
 #include <cctype>
 #include <fstream>
 #include <unordered_map>
+#include "globals.hpp"
 
 static std::unordered_map<std::string, SDL_Scancode> make_scancode_map() {
     using S = SDL_Scancode;
@@ -63,10 +64,10 @@ static std::string trim(const std::string& s) {
     return s.substr(a, b - a);
 }
 
-std::optional<InputBindings> load_input_bindings_from_ini(const std::string& path) {
+bool load_input_bindings_from_ini(const std::string& path) {
     std::ifstream f(path);
     if (!f.is_open())
-        return std::nullopt;
+        return false;
     auto map = make_scancode_map();
     InputBindings b{};
     std::string line;
@@ -109,5 +110,6 @@ std::optional<InputBindings> load_input_bindings_from_ini(const std::string& pat
         else if (key == "drop")
             b.drop = sc;
     }
-    return b;
+    ss->input_binds = b;
+    return true;
 }

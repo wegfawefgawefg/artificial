@@ -3,7 +3,6 @@
 #include "entity.hpp"
 #include "state.hpp"
 #include "globals.hpp"
-#ifdef GUB_USE_SOL2
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-conversion"
@@ -12,46 +11,21 @@
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
-#endif
 #include <cstdio>
 #include <filesystem>
-
-#ifdef GUB_ENABLE_LUA
-extern "C" {
-#include <lauxlib.h>
-#include <lua.h>
-#include <lualib.h>
-}
-#endif
+// sol2 pulls in the necessary Lua headers; no direct Lua C API used here.
 
 namespace fs = std::filesystem;
 
-LuaManager::LuaManager() {
-}
+LuaManager::LuaManager() {}
 LuaManager::~LuaManager() {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     if (S) {
         delete S;
         S = nullptr;
         L = nullptr;
     }
-#else
-    if (L) {
-        lua_close(L);
-        L = nullptr;
-    }
-#endif
-#endif
 }
 
-bool LuaManager::available() const {
-#ifdef GUB_ENABLE_LUA
-    return true;
-#else
-    return false;
-#endif
-}
 
 void LuaManager::clear() {
     powerups_.clear();
@@ -62,221 +36,27 @@ void LuaManager::clear() {
 }
 
 bool LuaManager::init() {
-#ifdef GUB_ENABLE_LUA
-    if (L)
+    if (S)
         return true;
-#ifdef GUB_USE_SOL2
     S = new sol::state();
     S->open_libraries(sol::lib::base, sol::lib::math, sol::lib::package, sol::lib::string,
                       sol::lib::table, sol::lib::os);
     L = S->lua_state();
-#else
-    L = luaL_newstate();
-    if (!L)
-        return false;
-    luaL_openlibs(L);
-#endif
     return register_api();
-#else
-    return false;
-#endif
 }
 
-#ifdef GUB_ENABLE_LUA
 static LuaManager* g_mgr = nullptr;
 static State* g_state_ctx = nullptr;
 static Entity* g_player_ctx = nullptr;
-#endif
 
-#if defined(GUB_ENABLE_LUA) && !defined(GUB_USE_SOL2)
-static int l_api_add_plate(lua_State* Ls) {
-    int n = 1;
-    if (lua_gettop(Ls) >= 1 && lua_isnumber(Ls, 1))
-        n = (int)lua_tointeger(Ls, 1);
-    if (g_player_ctx) {
-        g_player_ctx->stats.plates += n;
-        if (g_player_ctx->stats.plates < 0)
-            g_player_ctx->stats.plates = 0;
-        if (g_state_ctx && n > 0) {
-            if (auto* pm = g_state_ctx->metrics_for(g_player_ctx->vid))
-                pm->plates_gained += (std::uint32_t)n;
-        }
-    }
-    return 0;
-}
-static int l_api_heal(lua_State* Ls) {
-    int n = 0;
-    if (lua_gettop(Ls) >= 1 && lua_isnumber(Ls, 1))
-        n = (int)lua_tointeger(Ls, 1);
-    if (g_player_ctx) {
-        std::uint32_t hp = g_player_ctx->health;
-        std::uint32_t mx = g_player_ctx->max_hp;
-        if (mx == 0)
-            mx = 1000;
-        std::uint32_t nhp = hp + (n > 0 ? (std::uint32_t)n : 0u);
-        if (nhp > mx)
-            nhp = mx;
-        g_player_ctx->health = nhp;
-    }
-    return 0;
-}
-static int l_api_add_move_speed(lua_State* Ls) {
-    int n = 0;
-    if (lua_gettop(Ls) >= 1 && lua_isnumber(Ls, 1))
-        n = (int)lua_tointeger(Ls, 1);
-    if (g_player_ctx) {
-        g_player_ctx->stats.move_speed += (float)n;
-    }
-    return 0;
-}
+struct LuaCtxGuard {
+    LuaCtxGuard(State* s, Entity* p) { g_state_ctx = s; g_player_ctx = p; }
+    ~LuaCtxGuard() { g_state_ctx = nullptr; g_player_ctx = nullptr; }
+};
 
-static int l_register_powerup(lua_State* L) {
-    if (!lua_istable(L, 1))
-        return 0;
-    PowerupDef d{};
-    lua_getfield(L, 1, "name");
-    if (lua_isstring(L, -1))
-        d.name = lua_tostring(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "type");
-    if (lua_isinteger(L, -1))
-        d.type = (int)lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "sprite");
-    if (lua_isstring(L, -1))
-        d.sprite = lua_tostring(L, -1);
-    lua_pop(L, 1);
-    if (g_mgr)
-        g_mgr->add_powerup(d);
-    return 0;
-}
-static int l_register_item(lua_State* L) {
-    if (!lua_istable(L, 1))
-        return 0;
-    ItemDef d{};
-    lua_getfield(L, 1, "name");
-    if (lua_isstring(L, -1))
-        d.name = lua_tostring(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "type");
-    if (lua_isinteger(L, -1))
-        d.type = (int)lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "category");
-    if (lua_isinteger(L, -1))
-        d.category = (int)lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "max_count");
-    if (lua_isinteger(L, -1))
-        d.max_count = (int)lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "consume_on_use");
-    if (lua_isboolean(L, -1))
-        d.consume_on_use = lua_toboolean(L, -1) != 0;
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "sprite");
-    if (lua_isstring(L, -1))
-        d.sprite = lua_tostring(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "desc");
-    if (lua_isstring(L, -1))
-        d.desc = lua_tostring(L, -1);
-    lua_pop(L, 1);
-    // optional callbacks
-    int on_use_ref = -1;
-    lua_getfield(L, 1, "on_use");
-    if (lua_isfunction(L, -1)) {
-        on_use_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    } else {
-        lua_pop(L, 1);
-    }
-    d.on_use_ref = on_use_ref;
-    int on_tick_ref = -1;
-    lua_getfield(L, 1, "on_tick");
-    if (lua_isfunction(L, -1)) {
-        on_tick_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    } else {
-        lua_pop(L, 1);
-    }
-    d.on_tick_ref = on_tick_ref;
-    int on_shoot_ref = -1;
-    lua_getfield(L, 1, "on_shoot");
-    if (lua_isfunction(L, -1)) {
-        on_shoot_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    } else {
-        lua_pop(L, 1);
-    }
-    d.on_shoot_ref = on_shoot_ref;
-    int on_damage_ref = -1;
-    lua_getfield(L, 1, "on_damage");
-    if (lua_isfunction(L, -1)) {
-        on_damage_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    } else {
-        lua_pop(L, 1);
-    }
-    d.on_damage_ref = on_damage_ref;
-    if (g_mgr)
-        g_mgr->add_item(d);
-    return 0;
-}
-static int l_register_gun(lua_State* L) {
-    if (!lua_istable(L, 1))
-        return 0;
-    GunDef d{};
-    lua_getfield(L, 1, "name");
-    if (lua_isstring(L, -1))
-        d.name = lua_tostring(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "type");
-    if (lua_isinteger(L, -1))
-        d.type = (int)lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "damage");
-    if (lua_isnumber(L, -1))
-        d.damage = (float)lua_tonumber(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "rpm");
-    if (lua_isnumber(L, -1))
-        d.rpm = (float)lua_tonumber(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "deviation");
-    if (lua_isnumber(L, -1))
-        d.deviation = (float)lua_tonumber(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "recoil");
-    if (lua_isnumber(L, -1))
-        d.recoil = (float)lua_tonumber(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "control");
-    if (lua_isnumber(L, -1))
-        d.control = (float)lua_tonumber(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "max_recoil_spread_deg");
-    if (lua_isnumber(L, -1))
-        d.max_recoil_spread_deg = (float)lua_tonumber(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "pellets");
-    if (lua_isinteger(L, -1))
-        d.pellets_per_shot = (int)lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "mag");
-    if (lua_isinteger(L, -1))
-        d.mag = (int)lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    lua_getfield(L, 1, "ammo_max");
-    if (lua_isinteger(L, -1))
-        d.ammo_max = (int)lua_tointeger(L, -1);
-    lua_pop(L, 1);
-    if (g_mgr)
-        g_mgr->add_gun(d);
-    return 0;
-}
-#endif // GUB_ENABLE_LUA && !GUB_USE_SOL2
 
 bool LuaManager::register_api() {
-#ifdef GUB_ENABLE_LUA
     g_mgr = this;
-#ifdef GUB_USE_SOL2
     sol::state& s = *S;
     s.set_function("register_powerup", [this](sol::table t) {
         PowerupDef d{};
@@ -296,44 +76,14 @@ bool LuaManager::register_api() {
         d.desc = t.get_or("desc", std::string{});
         d.sound_use = t.get_or("sound_use", std::string{});
         d.sound_pickup = t.get_or("sound_pickup", std::string{});
-        sol::object onuse = t.get<sol::object>("on_use");
-        if (onuse.is<sol::function>()) {
-            sol::function f = onuse.as<sol::function>();
-            f.push();
-            d.on_use_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (auto o = t.get<sol::object>("on_use"); o.is<sol::function>()) d.on_use = o.as<sol::protected_function>();
         d.tick_rate_hz = t.get_or("tick_rate_hz", 0.0f);
         d.tick_phase = t.get_or("tick_phase", std::string("after"));
-        sol::object onar = t.get<sol::object>("on_active_reload");
-        if (onar.is<sol::function>()) {
-            sol::function f = onar.as<sol::function>();
-            f.push();
-            d.on_active_reload_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object onfar = t.get<sol::object>("on_failed_active_reload");
-        if (onfar.is<sol::function>()) {
-            sol::function f = onfar.as<sol::function>();
-            f.push();
-            d.on_failed_active_reload_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object ontaf = t.get<sol::object>("on_tried_to_active_reload_after_failing");
-        if (ontaf.is<sol::function>()) {
-            sol::function f = ontaf.as<sol::function>();
-            f.push();
-            d.on_tried_after_failed_ar_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object onpu = t.get<sol::object>("on_pickup");
-        if (onpu.is<sol::function>()) {
-            sol::function f = onpu.as<sol::function>();
-            f.push();
-            d.on_pickup_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object ondr = t.get<sol::object>("on_drop");
-        if (ondr.is<sol::function>()) {
-            sol::function f = ondr.as<sol::function>();
-            f.push();
-            d.on_drop_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (auto o = t.get<sol::object>("on_active_reload"); o.is<sol::function>()) d.on_active_reload = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_failed_active_reload"); o.is<sol::function>()) d.on_failed_active_reload = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_tried_to_active_reload_after_failing"); o.is<sol::function>()) d.on_tried_after_failed_ar = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_pickup"); o.is<sol::function>()) d.on_pickup = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_drop"); o.is<sol::function>()) d.on_drop = o.as<sol::protected_function>();
         add_item(d);
     });
     s.set_function("register_gun", [this](sol::table t) {
@@ -372,68 +122,20 @@ bool LuaManager::register_api() {
         d.ar_size_variance = t.get_or("ar_size_variance", 0.0f);
         d.ar_pos = t.get_or("ar_pos", 0.5f);
         // Additional gun reload hooks
-        sol::object onej = t.get<sol::object>("on_eject");
-        if (onej.is<sol::function>()) {
-            sol::function f = onej.as<sol::function>();
-            f.push();
-            d.on_eject_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (auto o = t.get<sol::object>("on_eject"); o.is<sol::function>()) d.on_eject = o.as<sol::protected_function>();
         sol::object orls = t.get<sol::object>("on_reload_start");
-        if (orls.is<sol::function>()) {
-            sol::function f = orls.as<sol::function>();
-            f.push();
-            d.on_reload_start_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (orls.is<sol::function>()) d.on_reload_start = orls.as<sol::protected_function>();
         sol::object orlf = t.get<sol::object>("on_reload_finish");
-        if (orlf.is<sol::function>()) {
-            sol::function f = orlf.as<sol::function>();
-            f.push();
-            d.on_reload_finish_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (orlf.is<sol::function>()) d.on_reload_finish = orlf.as<sol::protected_function>();
         d.ar_pos_variance = t.get_or("ar_pos_variance", 0.0f);
-        sol::object onjam = t.get<sol::object>("on_jam");
-        if (onjam.is<sol::function>()) {
-            sol::function f = onjam.as<sol::function>();
-            f.push();
-            d.on_jam_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (auto o = t.get<sol::object>("on_jam"); o.is<sol::function>()) d.on_jam = o.as<sol::protected_function>();
         // already captured above; now parse on_active_reload
-        sol::object onar = t.get<sol::object>("on_active_reload");
-        if (onar.is<sol::function>()) {
-            sol::function f = onar.as<sol::function>();
-            f.push();
-            d.on_active_reload_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object onfar = t.get<sol::object>("on_failed_active_reload");
-        if (onfar.is<sol::function>()) {
-            sol::function f = onfar.as<sol::function>();
-            f.push();
-            d.on_failed_active_reload_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object ontaf = t.get<sol::object>("on_tried_to_active_reload_after_failing");
-        if (ontaf.is<sol::function>()) {
-            sol::function f = ontaf.as<sol::function>();
-            f.push();
-            d.on_tried_after_failed_ar_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object onpu = t.get<sol::object>("on_pickup");
-        if (onpu.is<sol::function>()) {
-            sol::function f = onpu.as<sol::function>();
-            f.push();
-            d.on_pickup_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object ondr = t.get<sol::object>("on_drop");
-        if (ondr.is<sol::function>()) {
-            sol::function f = ondr.as<sol::function>();
-            f.push();
-            d.on_drop_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object ongs = t.get<sol::object>("on_step");
-        if (ongs.is<sol::function>()) {
-            sol::function f = ongs.as<sol::function>();
-            f.push();
-            d.on_step_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (auto o = t.get<sol::object>("on_active_reload"); o.is<sol::function>()) d.on_active_reload = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_failed_active_reload"); o.is<sol::function>()) d.on_failed_active_reload = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_tried_to_active_reload_after_failing"); o.is<sol::function>()) d.on_tried_after_failed_ar = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_pickup"); o.is<sol::function>()) d.on_pickup = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_drop"); o.is<sol::function>()) d.on_drop = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_step"); o.is<sol::function>()) d.on_step = o.as<sol::protected_function>();
         // Optional compatible_ammo list: { {type=..., weight=...}, ... }
         sol::object ammo_list_obj = t.get<sol::object>("compatible_ammo");
         if (ammo_list_obj.is<sol::table>()) {
@@ -471,12 +173,9 @@ bool LuaManager::register_api() {
         d.falloff_min_mult = t.get_or("falloff_min_mult", 1.0f);
         d.pierce_count = t.get_or("pierce_count", 0);
         // Optional hooks
-        sol::object oh = t.get<sol::object>("on_hit");
-        if (oh.is<sol::function>()) { sol::function f = oh.as<sol::function>(); f.push(); d.on_hit_ref = luaL_ref(L, LUA_REGISTRYINDEX); }
-        sol::object ohe = t.get<sol::object>("on_hit_entity");
-        if (ohe.is<sol::function>()) { sol::function f = ohe.as<sol::function>(); f.push(); d.on_hit_entity_ref = luaL_ref(L, LUA_REGISTRYINDEX); }
-        sol::object oht = t.get<sol::object>("on_hit_tile");
-        if (oht.is<sol::function>()) { sol::function f = oht.as<sol::function>(); f.push(); d.on_hit_tile_ref = luaL_ref(L, LUA_REGISTRYINDEX); }
+        if (auto o = t.get<sol::object>("on_hit"); o.is<sol::function>()) d.on_hit = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_hit_entity"); o.is<sol::function>()) d.on_hit_entity = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_hit_tile"); o.is<sol::function>()) d.on_hit_tile = o.as<sol::protected_function>();
         add_ammo(d);
     });
     s.set_function("register_projectile", [this](sol::table t) {
@@ -488,18 +187,8 @@ bool LuaManager::register_api() {
         d.size_y = t.get_or("size_y", 0.2f);
         d.physics_steps = t.get_or("physics_steps", 2);
         d.sprite = t.get_or("sprite", std::string{});
-        sol::object ohe = t.get<sol::object>("on_hit_entity");
-        if (ohe.is<sol::function>()) {
-            sol::function f = ohe.as<sol::function>();
-            f.push();
-            d.on_hit_entity_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
-        sol::object oht = t.get<sol::object>("on_hit_tile");
-        if (oht.is<sol::function>()) {
-            sol::function f = oht.as<sol::function>();
-            f.push();
-            d.on_hit_tile_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (auto o = t.get<sol::object>("on_hit_entity"); o.is<sol::function>()) d.on_hit_entity = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_hit_tile"); o.is<sol::function>()) d.on_hit_tile = o.as<sol::protected_function>();
         add_projectile(d);
     });
     s.set_function("register_crate", [this](sol::table t) {
@@ -510,11 +199,7 @@ bool LuaManager::register_api() {
         d.label = t.get_or("label", std::string{});
         // optional on_open
         sol::object onopen = t.get<sol::object>("on_open");
-        if (onopen.is<sol::function>()) {
-            sol::function f = onopen.as<sol::function>();
-            f.push();
-            d.on_open_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-        }
+        if (onopen.is<sol::function>()) d.on_open = onopen.as<sol::protected_function>();
         // optional drops table
         sol::object dopts = t.get<sol::object>("drops");
         if (dopts.is<sol::table>()) {
@@ -549,18 +234,18 @@ bool LuaManager::register_api() {
                 g_player_ctx->stats.plates = 0;
             if (g_state_ctx && n > 0) {
                 if (auto* pm = g_state_ctx->metrics_for(g_player_ctx->vid))
-                    pm->plates_gained += (std::uint32_t)n;
+                    pm->plates_gained += (uint32_t)n;
             }
         }
     });
     api.set_function("heal", [](int n) {
         if (g_player_ctx) {
-            std::uint32_t hp = g_player_ctx->health;
-            std::uint32_t mxhp = g_player_ctx->max_hp;
+            uint32_t hp = g_player_ctx->health;
+            uint32_t mxhp = g_player_ctx->max_hp;
             if (mxhp == 0)
                 mxhp = 1000;
-            std::uint32_t add = (n > 0 ? (std::uint32_t)n : 0u);
-            std::uint32_t nhp = hp + add;
+            uint32_t add = (n > 0 ? (uint32_t)n : 0u);
+            uint32_t nhp = hp + add;
             if (nhp > mxhp)
                 nhp = mxhp;
             g_player_ctx->health = nhp;
@@ -601,42 +286,14 @@ bool LuaManager::register_api() {
         }
     });
     // Optional registered on_dash handler (alternative to global function)
-    s.set_function("register_on_dash", [this](sol::function f) {
-        f.push();
-        on_dash_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
-    s.set_function("register_on_active_reload", [this](sol::function f) {
-        f.push();
-        on_active_reload_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
-    s.set_function("register_on_step", [this](sol::function f) {
-        f.push();
-        on_step_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
-    s.set_function("register_on_failed_active_reload", [this](sol::function f) {
-        f.push();
-        on_failed_active_reload_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
-    s.set_function("register_on_tried_to_active_reload_after_failing", [this](sol::function f) {
-        f.push();
-        on_tried_after_failed_ar_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
-    s.set_function("register_on_eject", [this](sol::function f) {
-        f.push();
-        on_eject_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
-    s.set_function("register_on_reload_start", [this](sol::function f) {
-        f.push();
-        on_reload_start_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
-    s.set_function("register_on_reload_finish", [this](sol::function f) {
-        f.push();
-        on_reload_finish_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
-    s.set_function("register_on_active_reload", [this](sol::function f) {
-        f.push();
-        on_active_reload_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    });
+    s.set_function("register_on_dash", [this](sol::function f) { on_dash = sol::protected_function(f); });
+    s.set_function("register_on_active_reload", [this](sol::function f) { on_active_reload = sol::protected_function(f); });
+    s.set_function("register_on_step", [this](sol::function f) { on_step = sol::protected_function(f); });
+    s.set_function("register_on_failed_active_reload", [this](sol::function f) { on_failed_active_reload = sol::protected_function(f); });
+    s.set_function("register_on_tried_to_active_reload_after_failing", [this](sol::function f) { on_tried_after_failed_ar = sol::protected_function(f); });
+    s.set_function("register_on_eject", [this](sol::function f) { on_eject = sol::protected_function(f); });
+    s.set_function("register_on_reload_start", [this](sol::function f) { on_reload_start = sol::protected_function(f); });
+    s.set_function("register_on_reload_finish", [this](sol::function f) { on_reload_finish = sol::protected_function(f); });
     api.set_function("refill_ammo", []() {
         if (!g_state_ctx || !g_player_ctx)
             return;
@@ -850,31 +507,9 @@ bool LuaManager::register_api() {
         }
     });
     return true;
-#else  // C API registration
-    lua_pushcfunction(L, l_register_powerup);
-    lua_setglobal(L, "register_powerup");
-    lua_pushcfunction(L, l_register_item);
-    lua_setglobal(L, "register_item");
-    lua_pushcfunction(L, l_register_gun);
-    lua_setglobal(L, "register_gun");
-    lua_newtable(L);
-    lua_pushcfunction(L, l_api_add_plate);
-    lua_setfield(L, -2, "add_plate");
-    lua_pushcfunction(L, l_api_heal);
-    lua_setfield(L, -2, "heal");
-    lua_pushcfunction(L, l_api_add_move_speed);
-    lua_setfield(L, -2, "add_move_speed");
-    lua_setglobal(L, "api");
-    return true;
-#endif // sol2 vs C API
-#else
-    return false;
-#endif
 }
 
 bool LuaManager::run_file(const std::string& path) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     sol::protected_function_result r = S->safe_script_file(path);
     if (!r.valid()) {
         sol::error e = r;
@@ -882,917 +517,299 @@ bool LuaManager::run_file(const std::string& path) {
         return false;
     }
     return true;
-#else
-    if (luaL_dofile(L, path.c_str()) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] error in %s: %s\n", path.c_str(), err ? err : "(unknown)");
-        lua_pop(L, 1);
-        return false;
-    }
-    return true;
-#endif
-#else
-    (void)path;
-    return false;
-#endif
 }
 
 void LuaManager::call_projectile_on_hit_entity(int proj_type) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     const ProjectileDef* pd = find_projectile(proj_type);
-    if (!pd || pd->on_hit_entity_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, pd->on_hit_entity_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] projectile on_hit_entity error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#endif
-#endif
+    if (!pd || !pd->on_hit_entity.valid()) return;
+    auto r = pd->on_hit_entity();
+    if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] projectile on_hit_entity error: %s\n", e.what()); }
 }
 
 void LuaManager::call_projectile_on_hit_tile(int proj_type) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     const ProjectileDef* pd = find_projectile(proj_type);
-    if (!pd || pd->on_hit_tile_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, pd->on_hit_tile_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] projectile on_hit_tile error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#endif
-#endif
+    if (!pd || !pd->on_hit_tile.valid()) return;
+    auto r = pd->on_hit_tile();
+    if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] projectile on_hit_tile error: %s\n", e.what()); }
 }
 
 void LuaManager::call_ammo_on_hit(int ammo_type) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     const AmmoDef* ad = find_ammo(ammo_type);
-    if (!ad || ad->on_hit_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, ad->on_hit_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] ammo on_hit error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#endif
-#endif
+    if (!ad || !ad->on_hit.valid()) return;
+    auto r = ad->on_hit();
+    if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] ammo on_hit error: %s\n", e.what()); }
 }
 
 void LuaManager::call_ammo_on_hit_entity(int ammo_type) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     const AmmoDef* ad = find_ammo(ammo_type);
-    if (!ad || ad->on_hit_entity_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, ad->on_hit_entity_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] ammo on_hit_entity error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#endif
-#endif
+    if (!ad || !ad->on_hit_entity.valid()) return;
+    auto r = ad->on_hit_entity();
+    if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] ammo on_hit_entity error: %s\n", e.what()); }
 }
 
 void LuaManager::call_ammo_on_hit_tile(int ammo_type) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     const AmmoDef* ad = find_ammo(ammo_type);
-    if (!ad || ad->on_hit_tile_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, ad->on_hit_tile_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] ammo on_hit_tile error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#endif
-#endif
+    if (!ad || !ad->on_hit_tile.valid()) return;
+    auto r = ad->on_hit_tile();
+    if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] ammo on_hit_tile error: %s\n", e.what()); }
 }
 
 void LuaManager::call_crate_on_open(int crate_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
-    for (auto const& c : crates_)
-        if (c.type == crate_type) {
-            if (c.on_open_ref >= 0) {
-                lua_rawgeti(L, LUA_REGISTRYINDEX, c.on_open_ref);
-                if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-                    const char* err = lua_tostring(L, -1);
-                    std::fprintf(stderr, "[lua] crate on_open error: %s\n",
-                                 err ? err : "(unknown)");
-                    lua_pop(L, 1);
-                }
-            }
-            break;
+    for (auto const& c : crates_) if (c.type == crate_type) {
+        if (c.on_open.valid()) {
+            auto r = c.on_open();
+            if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] crate on_open error: %s\n", e.what()); }
         }
-#else
-    (void)crate_type;
-    (void)player;
-#endif
-#else
-    (void)crate_type;
-    (void)player;
-#endif
+        break;
+    }
 }
 
 void LuaManager::call_on_dash(Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    if (on_dash_ref >= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, on_dash_ref);
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(L, -1);
-            std::fprintf(stderr, "[lua] on_dash (registered) error: %s\n", err ? err : "(unknown)");
-            lua_pop(L, 1);
-        }
+    LuaCtxGuard _ctx(ss, &player);
+    if (on_dash.valid()) {
+        auto r = on_dash(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_dash error: %s\n", e.what()); }
     } else {
         sol::object obj = S->get<sol::object>("on_dash");
-        if (obj.is<sol::function>()) {
-            sol::function f = obj.as<sol::function>();
-            sol::protected_function_result r = f();
-            if (!r.valid()) {
-                sol::error e = r;
-                std::fprintf(stderr, "[lua] error in on_dash: %s\n", e.what());
-            }
-        }
+        if (obj.is<sol::function>()) { auto r = obj.as<sol::protected_function>()(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_dash error: %s\n", e.what()); } }
     }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)player;
-#endif
-#else
-    (void)player;
-#endif
+    (void)0;
 }
 
 void LuaManager::call_on_step(Entity* player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = player;
-    if (on_step_ref >= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, on_step_ref);
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(L, -1);
-            std::fprintf(stderr, "[lua] on_step error: %s\n", err ? err : "(unknown)");
-            lua_pop(L, 1);
-        }
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)player;
-#endif
-#else
-    (void)player;
-#endif
+    LuaCtxGuard _ctx(ss, player);
+    if (on_step.valid()) { auto r = on_step(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_step error: %s\n", e.what()); } }
+    (void)0;
 }
 
 void LuaManager::call_on_active_reload(Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    if (on_active_reload_ref >= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, on_active_reload_ref);
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(L, -1);
-            std::fprintf(stderr, "[lua] on_active_reload (registered) error: %s\n",
-                         err ? err : "(unknown)");
-            lua_pop(L, 1);
-        }
-    } else {
+    LuaCtxGuard _ctx(ss, &player);
+    if (on_active_reload.valid()) { auto r = on_active_reload(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_active_reload error: %s\n", e.what()); } }
+    else {
         sol::object obj = S->get<sol::object>("on_active_reload");
-        if (obj.is<sol::function>()) {
-            sol::function f = obj.as<sol::function>();
-            sol::protected_function_result r = f();
-            if (!r.valid()) {
-                sol::error e = r;
-                std::fprintf(stderr, "[lua] error in on_active_reload: %s\n", e.what());
-            }
-        }
+        if (obj.is<sol::function>()) { auto r = obj.as<sol::protected_function>()(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_active_reload error: %s\n", e.what()); } }
     }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)player;
-#endif
-#else
-    (void)player;
-#endif
+    (void)0;
 }
 
 void LuaManager::call_on_failed_active_reload(Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    if (on_failed_active_reload_ref >= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, on_failed_active_reload_ref);
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(L, -1);
-            std::fprintf(stderr,
-                         "[lua] on_failed_active_reload (registered) error: %s\n",
-                         err ? err : "(unknown)");
-            lua_pop(L, 1);
-        }
-    } else {
+    LuaCtxGuard _ctx(ss, &player);
+    if (on_failed_active_reload.valid()) { auto r = on_failed_active_reload(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_failed_active_reload error: %s\n", e.what()); } }
+    else {
         sol::object obj = S->get<sol::object>("on_failed_active_reload");
-        if (obj.is<sol::function>()) {
-            sol::function f = obj.as<sol::function>();
-            auto r = f();
-            if (!r.valid()) {
-                sol::error e = r;
-                std::fprintf(stderr, "[lua] on_failed_active_reload error: %s\n", e.what());
-            }
-        }
+        if (obj.is<sol::function>()) { auto r = obj.as<sol::protected_function>()(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_failed_active_reload error: %s\n", e.what()); } }
     }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)player;
-#endif
-#else
-    (void)player;
-#endif
+    (void)0;
 }
 
 void LuaManager::call_on_tried_after_failed_ar(Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    if (on_tried_after_failed_ar_ref >= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, on_tried_after_failed_ar_ref);
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(L, -1);
-            std::fprintf(stderr,
-                         "[lua] on_tried_to_active_reload_after_failing (registered) error: %s\n",
-                         err ? err : "(unknown)");
-            lua_pop(L, 1);
-        }
-    } else {
+    LuaCtxGuard _ctx(ss, &player);
+    if (on_tried_after_failed_ar.valid()) { auto r = on_tried_after_failed_ar(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_tried_to_active_reload_after_failing error: %s\n", e.what()); } }
+    else {
         sol::object obj = S->get<sol::object>("on_tried_to_active_reload_after_failing");
-        if (obj.is<sol::function>()) {
-            sol::function f = obj.as<sol::function>();
-            auto r = f();
-            if (!r.valid()) {
-                sol::error e = r;
-                std::fprintf(stderr,
-                             "[lua] on_tried_to_active_reload_after_failing error: %s\n",
-                             e.what());
-            }
-        }
+        if (obj.is<sol::function>()) { auto r = obj.as<sol::protected_function>()(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_tried_to_active_reload_after_failing error: %s\n", e.what()); } }
     }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)player;
-#endif
-#else
-    (void)player;
-#endif
+    (void)0;
 }
 
 void LuaManager::call_on_eject(Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    if (on_eject_ref >= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, on_eject_ref);
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(L, -1);
-            std::fprintf(stderr, "[lua] on_eject error: %s\n", err ? err : "(unknown)");
-            lua_pop(L, 1);
-        }
-    } else {
+    LuaCtxGuard _ctx(ss, &player);
+    if (on_eject.valid()) { auto r = on_eject(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_eject error: %s\n", e.what()); } }
+    else {
         sol::object obj = S->get<sol::object>("on_eject");
-        if (obj.is<sol::function>()) {
-            sol::function f = obj.as<sol::function>();
-            auto r = f();
-            if (!r.valid()) {
-                sol::error e = r;
-                std::fprintf(stderr, "[lua] on_eject error: %s\n", e.what());
-            }
-        }
+        if (obj.is<sol::function>()) { auto r = obj.as<sol::protected_function>()(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_eject error: %s\n", e.what()); } }
     }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)player;
-#endif
-#else
-    (void)player;
-#endif
+    (void)0;
 }
 
 void LuaManager::call_on_reload_start(Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    if (on_reload_start_ref >= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, on_reload_start_ref);
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(L, -1);
-            std::fprintf(stderr, "[lua] on_reload_start error: %s\n", err ? err : "(unknown)");
-            lua_pop(L, 1);
-        }
-    } else {
+    LuaCtxGuard _ctx(ss, &player);
+    if (on_reload_start.valid()) { auto r = on_reload_start(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_reload_start error: %s\n", e.what()); } }
+    else {
         sol::object obj = S->get<sol::object>("on_reload_start");
-        if (obj.is<sol::function>()) {
-            sol::function f = obj.as<sol::function>();
-            auto r = f();
-            if (!r.valid()) {
-                sol::error e = r;
-                std::fprintf(stderr, "[lua] on_reload_start error: %s\n", e.what());
-            }
-        }
+        if (obj.is<sol::function>()) { auto r = obj.as<sol::protected_function>()(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_reload_start error: %s\n", e.what()); } }
     }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)player;
-#endif
-#else
-    (void)player;
-#endif
+    (void)0;
 }
 
 void LuaManager::call_on_reload_finish(Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    if (on_reload_finish_ref >= 0) {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, on_reload_finish_ref);
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(L, -1);
-            std::fprintf(stderr, "[lua] on_reload_finish error: %s\n", err ? err : "(unknown)");
-            lua_pop(L, 1);
-        }
-    } else {
+    LuaCtxGuard _ctx(ss, &player);
+    if (on_reload_finish.valid()) { auto r = on_reload_finish(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_reload_finish error: %s\n", e.what()); } }
+    else {
         sol::object obj = S->get<sol::object>("on_reload_finish");
-        if (obj.is<sol::function>()) {
-            sol::function f = obj.as<sol::function>();
-            auto r = f();
-            if (!r.valid()) {
-                sol::error e = r;
-                std::fprintf(stderr, "[lua] on_reload_finish error: %s\n", e.what());
-            }
-        }
+        if (obj.is<sol::function>()) { auto r = obj.as<sol::protected_function>()(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_reload_finish error: %s\n", e.what()); } }
     }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)player;
-#endif
-#else
-    (void)player;
-#endif
+    (void)0;
 }
 
 void LuaManager::call_gun_on_eject(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_eject_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_eject_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] gun on_eject error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
+    if (!gd || !gd->on_eject.valid()) return;
+    auto r = gd->on_eject(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] gun on_eject error: %s\n", e.what()); }
     (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
 }
 
 void LuaManager::call_gun_on_reload_start(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_reload_start_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_reload_start_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] gun on_reload_start error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
+    if (!gd || !gd->on_reload_start.valid()) return;
+    auto r = gd->on_reload_start(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] gun on_reload_start error: %s\n", e.what()); }
     (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
 }
 
 void LuaManager::call_gun_on_reload_finish(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_reload_finish_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_reload_finish_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] gun on_reload_finish error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
+    if (!gd || !gd->on_reload_finish.valid()) return;
+    auto r = gd->on_reload_finish(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] gun on_reload_finish error: %s\n", e.what()); }
     (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
 }
 
 void LuaManager::call_item_on_eject(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
         if (d.type == item_type) {
             def = &d;
             break;
         }
-    if (!def || def->on_eject_ref < 0)
+    if (!def || !def->on_eject.valid())
         return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_eject_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] item on_eject error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    LuaCtxGuard _ctx(ss, &player);
+    auto r = def->on_eject(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] item on_eject error: %s\n", e.what()); }
+    (void)0; (void)item_type;
 }
 
 void LuaManager::call_item_on_reload_start(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
         if (d.type == item_type) {
             def = &d;
             break;
         }
-    if (!def || def->on_reload_start_ref < 0)
+    if (!def || !def->on_reload_start.valid())
         return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_reload_start_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] item on_reload_start error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    LuaCtxGuard _ctx2(ss, &player);
+    auto r = def->on_reload_start(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] item on_reload_start error: %s\n", e.what()); }
+    (void)0; (void)item_type;
 }
 
 void LuaManager::call_item_on_reload_finish(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
         if (d.type == item_type) {
             def = &d;
             break;
         }
-    if (!def || def->on_reload_finish_ref < 0)
+    if (!def || !def->on_reload_finish.valid())
         return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_reload_finish_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] item on_reload_finish error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    LuaCtxGuard _ctx3(ss, &player);
+    auto r = def->on_reload_finish(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] item on_reload_finish error: %s\n", e.what()); }
+    (void)0;
 }
 
 void LuaManager::call_gun_on_active_reload(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_active_reload_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_active_reload_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] on_active_reload gun error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
-    (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
+    if (!gd || !gd->on_active_reload.valid()) return;
+    auto r = gd->on_active_reload(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_active_reload gun error: %s\n", e.what()); }
 }
 
 void LuaManager::call_gun_on_failed_active_reload(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_failed_active_reload_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_failed_active_reload_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] on_failed_active_reload gun error: %s\n",
-                     err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
-    (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
+    if (!gd || !gd->on_failed_active_reload.valid()) return;
+    auto r = gd->on_failed_active_reload(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_failed_active_reload gun error: %s\n", e.what()); }
 }
 
 void LuaManager::call_gun_on_tried_after_failed_ar(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_tried_after_failed_ar_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_tried_after_failed_ar_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr,
-                     "[lua] on_tried_to_active_reload_after_failing gun error: %s\n",
-                     err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
-    (void)gun_type;
-    (void)state;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)state;
-    (void)player;
-#endif
+    if (!gd || !gd->on_tried_after_failed_ar.valid()) return;
+    auto r = gd->on_tried_after_failed_ar(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_tried_to_active_reload_after_failing gun error: %s\n", e.what()); }
 }
 
 void LuaManager::call_gun_on_step(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_step_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_step_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] gun on_step error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
-    (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
+    if (!gd || !gd->on_step.valid()) return;
+    auto r = gd->on_step(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] gun on_step error: %s\n", e.what()); }
 }
 
 void LuaManager::call_item_on_active_reload(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    const ItemDef* def = nullptr;
-    for (auto const& d : items_)
-        if (d.type == item_type) {
-            def = &d;
-            break;
-        }
-    if (!def || def->on_active_reload_ref < 0)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_active_reload_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] item on_active_reload error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    const ItemDef* def = nullptr; for (auto const& d : items_) if (d.type == item_type) { def = &d; break; }
+    if (!def || !def->on_active_reload.valid()) return;
+    LuaCtxGuard _ctx(ss, &player);
+    auto r = def->on_active_reload(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] item on_active_reload error: %s\n", e.what()); }
+    (void)0;
 }
 
 void LuaManager::call_item_on_failed_active_reload(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    const ItemDef* def = nullptr;
-    for (auto const& d : items_)
-        if (d.type == item_type) {
-            def = &d;
-            break;
-        }
-    if (!def || def->on_failed_active_reload_ref < 0)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_failed_active_reload_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] item on_failed_active_reload error: %s\n",
-                     err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    const ItemDef* def = nullptr; for (auto const& d : items_) if (d.type == item_type) { def = &d; break; }
+    if (!def || !def->on_failed_active_reload.valid()) return;
+    LuaCtxGuard _ctx2(ss, &player);
+    auto r = def->on_failed_active_reload(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] item on_failed_active_reload error: %s\n", e.what()); }
+    (void)0;
 }
 
 void LuaManager::call_item_on_tried_after_failed_ar(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    const ItemDef* def = nullptr;
-    for (auto const& d : items_)
-        if (d.type == item_type) {
-            def = &d;
-            break;
-        }
-    if (!def || def->on_tried_after_failed_ar_ref < 0)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_tried_after_failed_ar_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr,
-                     "[lua] item on_tried_to_active_reload_after_failing error: %s\n",
-                     err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    const ItemDef* def = nullptr; for (auto const& d : items_) if (d.type == item_type) { def = &d; break; }
+    if (!def || !def->on_tried_after_failed_ar.valid()) return;
+    LuaCtxGuard _ctx3(ss, &player);
+    auto r = def->on_tried_after_failed_ar(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] item on_tried_to_active_reload_after_failing error: %s\n", e.what()); }
+    (void)0;
 }
 
 void LuaManager::call_gun_on_pickup(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_pickup_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_pickup_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] gun on_pickup error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
-    (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
+    if (!gd || !gd->on_pickup.valid()) return;
+    auto r = gd->on_pickup(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] gun on_pickup error: %s\n", e.what()); }
 }
 
 void LuaManager::call_gun_on_drop(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_drop_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_drop_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] gun on_drop error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
-    (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
+    if (!gd || !gd->on_drop.valid()) return;
+    auto r = gd->on_drop(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] gun on_drop error: %s\n", e.what()); }
 }
 
 void LuaManager::call_item_on_pickup(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    const ItemDef* def = nullptr;
-    for (auto const& d : items_)
-        if (d.type == item_type) {
-            def = &d;
-            break;
-        }
-    if (!def || def->on_pickup_ref < 0)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_pickup_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] item on_pickup error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    const ItemDef* def = nullptr; for (auto const& d : items_) if (d.type == item_type) { def = &d; break; }
+    if (!def || !def->on_pickup.valid()) return;
+    LuaCtxGuard _ctx4(ss, &player);
+    auto r = def->on_pickup(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] item on_pickup error: %s\n", e.what()); }
+    (void)0;
 }
 
 void LuaManager::call_item_on_drop(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    const ItemDef* def = nullptr;
-    for (auto const& d : items_)
-        if (d.type == item_type) {
-            def = &d;
-            break;
-        }
-    if (!def || def->on_drop_ref < 0)
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_drop_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] item on_drop error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    const ItemDef* def = nullptr; for (auto const& d : items_) if (d.type == item_type) { def = &d; break; }
+    if (!def || !def->on_drop.valid()) return;
+    LuaCtxGuard _ctx5(ss, &player);
+    auto r = def->on_drop(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] item on_drop error: %s\n", e.what()); }
+    (void)0;
 }
 
 void LuaManager::call_generate_room() {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
-    if (!S)
-        return;
     sol::object obj = S->get<sol::object>("generate_room");
-    if (!obj.is<sol::function>())
-        return;
-    g_state_ctx = g_state;
-    g_player_ctx = nullptr;
-    sol::function f = obj.as<sol::function>();
-    sol::protected_function_result r = f();
-    if (!r.valid()) {
-        sol::error e = r;
-        std::fprintf(stderr, "[lua] error in generate_room: %s\n", e.what());
+    if (!obj.is<sol::function>()) return;
+    LuaCtxGuard _ctx(ss, nullptr);
+    {
+        auto r = obj.as<sol::protected_function>()();
+        if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] error in generate_room: %s\n", e.what()); }
     }
-    g_state_ctx = nullptr;
-#endif
-#else
-    (void)0;
-#endif
 }
 
 void LuaManager::call_gun_on_jam(int gun_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
-#ifdef GUB_USE_SOL2
     (void)player;
     const GunDef* gd = find_gun_def_by_type(guns_, gun_type);
-    if (!gd || gd->on_jam_ref < 0)
-        return;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, gd->on_jam_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] on_jam error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-#else
-    (void)gun_type;
-    (void)player;
-#endif
-#else
-    (void)gun_type;
-    (void)player;
-#endif
+    if (!gd || !gd->on_jam.valid()) return;
+    auto r = gd->on_jam(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_jam error: %s\n", e.what()); }
 }
 
-bool LuaManager::load_mods(const std::string& mods_root) {
+bool LuaManager::load_mods() {
+    auto mods_root = mm->root;
     clear();
-#ifdef GUB_ENABLE_LUA
     std::error_code ec;
     if (!fs::exists(mods_root, ec) || !fs::is_directory(mods_root, ec))
         return false;
@@ -1820,8 +837,7 @@ bool LuaManager::load_mods(const std::string& mods_root) {
     }
     std::printf("[lua] loaded: %zu powerups, %zu items, %zu guns, %zu ammo, %zu projectiles\n",
                 powerups_.size(), items_.size(), guns_.size(), ammo_.size(), projectiles_.size());
-    // Optional drop tables (sol2 only)
-#ifdef GUB_USE_SOL2
+    // Optional drop tables
     drops_.powerups.clear();
     drops_.items.clear();
     drops_.guns.clear();
@@ -1850,129 +866,71 @@ bool LuaManager::load_mods(const std::string& mods_root) {
             parse_list("guns", drops_.guns);
         }
     }
-#endif
     return true;
-#else
-    (void)mods_root;
-    return false;
-#endif
 }
 
 bool LuaManager::call_item_on_use(int item_type, Entity& player,
                                   std::string* out_msg) {
-#ifdef GUB_ENABLE_LUA
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
         if (d.type == item_type) {
             def = &d;
             break;
         }
-    if (!def || def->on_use_ref < 0)
+    if (!def || !def->on_use.valid())
         return false;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_use_ref);
-    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] on_use error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-        g_state_ctx = nullptr;
-        g_player_ctx = nullptr;
-        return false;
+    LuaCtxGuard _ctx(ss, &player);
+    auto r = def->on_use();
+    if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_use error: %s\n", e.what()); g_state_ctx=nullptr; g_player_ctx=nullptr; return false; }
+    if (out_msg && r.return_count() >= 1) {
+        sol::object o = r.get<sol::object>();
+        if (o.is<std::string>()) *out_msg = o.as<std::string>();
     }
-    if (out_msg && lua_isstring(L, -1)) {
-        *out_msg = lua_tostring(L, -1);
-    }
-    lua_pop(L, 1);
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
+    (void)0;
     return true;
-#else
-    (void)item_type;
-    (void)player;
-    (void)out_msg;
-    return false;
-#endif
 }
 
 void LuaManager::call_item_on_tick(int item_type, Entity& player, float dt) {
-#ifdef GUB_ENABLE_LUA
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
         if (d.type == item_type) {
             def = &d;
             break;
         }
-    if (!def || def->on_tick_ref < 0)
+    if (!def || !def->on_tick.valid())
         return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_tick_ref);
-    lua_pushnumber(L, (lua_Number)dt);
-    if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] on_tick error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-    (void)dt;
-#endif
+    LuaCtxGuard _ctx2(ss, &player);
+    auto r = def->on_tick(dt);
+    if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_tick error: %s\n", e.what()); }
+    (void)0;
 }
 
 void LuaManager::call_item_on_shoot(int item_type, Entity& player) {
-#ifdef GUB_ENABLE_LUA
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
         if (d.type == item_type) {
             def = &d;
             break;
         }
-    if (!def || def->on_shoot_ref < 0)
+    if (!def || !def->on_shoot.valid())
         return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_shoot_ref);
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] on_shoot error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
-    }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-#endif
+    LuaCtxGuard _ctx3(ss, &player);
+    auto r = def->on_shoot(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_shoot error: %s\n", e.what()); }
+    (void)0;
 }
 
 void LuaManager::call_item_on_damage(int item_type, Entity& player, int attacker_ap) {
-#ifdef GUB_ENABLE_LUA
     const ItemDef* def = nullptr;
     for (auto const& d : items_)
         if (d.type == item_type) {
             def = &d;
             break;
         }
-    if (!def || def->on_damage_ref < 0)
+    if (!def || !def->on_damage.valid())
         return;
-    g_state_ctx = g_state;
-    g_player_ctx = &player;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, def->on_damage_ref);
-    lua_pushinteger(L, (lua_Integer)attacker_ap);
-    if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
-        const char* err = lua_tostring(L, -1);
-        std::fprintf(stderr, "[lua] on_damage error: %s\n", err ? err : "(unknown)");
-        lua_pop(L, 1);
+    {
+        LuaCtxGuard _ctx(ss, &player);
+        auto r = def->on_damage(attacker_ap);
+        if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_damage error: %s\n", e.what()); }
     }
-    g_state_ctx = nullptr;
-    g_player_ctx = nullptr;
-#else
-    (void)item_type;
-    (void)player;
-    (void)attacker_ap;
-#endif
 }

@@ -16,12 +16,12 @@ struct ItemInstance {
     // Runtime state
     float use_cooldown{0.0f};
     float use_cooldown_countdown{0.0f};
-    std::uint32_t modifiers_hash{0}; // items with different mods must not stack
+    uint32_t modifiers_hash{0}; // items with different mods must not stack
     // Optional ticking accumulator (opt-in via def.tick_rate_hz)
     float tick_acc{0.0f};
 };
 
-class ItemsPool : public Pool<ItemInstance, 1024> {
+struct ItemsPool : public Pool<ItemInstance, 1024> {
   public:
     std::optional<VID> spawn_from_def(const ItemDef& d, uint32_t count = 1) {
         auto v = alloc();
@@ -43,7 +43,7 @@ struct GroundItem {
     glm::vec2 size{0.125f, 0.125f};
 };
 
-class GroundItemsPool {
+struct GroundItemsPool {
   public:
     static constexpr std::size_t MAX = 1024;
     GroundItemsPool() {

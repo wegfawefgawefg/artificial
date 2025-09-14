@@ -1,23 +1,40 @@
 {
-  "cmake.useCMakePresets": "always",
-  "cmake.configureOnOpen": true,
-  "cmake.buildDirectory": "${workspaceFolder}/build",
-  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
-  "C_Cpp.errorSquiggles": "enabled",
-  "cmake.configureEnvironment": {},
-  "[cpp]": {
-    "editor.defaultFormatter": "ms-vscode.cpptools"
-  },
-  "C_Cpp.clang_format_path": "/usr/bin/clang-format-14",
-  "C_Cpp.clang_format_fallbackStyle": "file",
-  "editor.formatOnSave": true,
-  "files.associations": {
-    "*.tpp": "cpp"
-  },
-  "C_Cpp.formatting": "clangFormat"
-  ,
-  "editor.tabSize": 4,
-  "editor.insertSpaces": true,
-  "editor.detectIndentation": false
+    "cmake.useCMakePresets": "always",
+    "cmake.configureOnOpen": true,
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.default.cppStandard": "c++20",
+    "C_Cpp.default.intelliSenseMode": "gcc-x64",
+    "C_Cpp.default.compilerPath": "/usr/bin/g++",
+    "cmake.configureEnvironment": {},
+    "[cpp]": {
+        "editor.defaultFormatter": "ms-vscode.cpptools"
+    },
+    "C_Cpp.clang_format_path": "/usr/bin/clang-format-14",
+    "C_Cpp.clang_format_fallbackStyle": "file",
+    "editor.formatOnSave": true,
+    "files.associations": {
+        "*.tpp": "cpp",
+        "tuple": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "vector": "cpp",
+        "system_error": "cpp",
+        "forward_list": "cpp",
+        "list": "cpp",
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "array": "cpp",
+        "memory": "cpp",
+        "istream": "cpp",
+        "functional": "cpp",
+        "utility": "cpp",
+        "variant": "cpp"
+    },
+    "C_Cpp.formatting": "clangFormat",
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.detectIndentation": false
 }

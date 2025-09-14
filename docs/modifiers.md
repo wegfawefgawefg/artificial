@@ -3,7 +3,7 @@ Modifier System Design (Draft)
 
 Goals
 -----
-- Allow arbitrary, composable modifiers defined in Lua to affect gameplay at multiple scopes (player, class, gun, item, projectile, enemy).
+- Allow arbitrary, composable modifiers defined in Lua to affect gameplay at multiple scopes (player, struct, gun, item, projectile, enemy).
 - Support both stat changes (e.g., +move_speed, reload_mult=0.8) and behavioral hooks (e.g., on_kill 20% explode, on_hit apply poison).
 - Compose many modifiers; some may cancel out (e.g., heavy + light variants) or stack with durations.
 - Deterministic, data-driven application order with stable results; predictable merging/splitting (e.g., items with different mods don’t stack).
@@ -17,7 +17,7 @@ Core Concepts
   - hooks: optional callbacks (in Lua) for events (see Hooks section)
   - constraints: optional rules (e.g., mutually_exclusive_with={"light"}, max_stacks=1)
 - Attachments:
-  - Player modifiers (class, perks, powerups)
+  - Player modifiers (struct, perks, powerups)
   - Gun modifiers (variants, roll-based affixes)
   - Item modifiers (upgrades, flavored variants)
   - Projectile modifiers (spawned from gun/player/item context)
@@ -44,7 +44,7 @@ Evaluation and Composition
 --------------------------
 - Stats pipeline builds an EffectiveStats/Params view at use-site (shoot/reload/move):
   1) Start from base (gun/item/player)
-  2) Apply additive modifiers from all scopes (ordered: player → class → item → gun)
+  2) Apply additive modifiers from all scopes (ordered: player → struct → item → gun)
   3) Apply multiplicative modifiers (same order)
   4) Clamp where needed (e.g., min reload time)
 - Hooks collect from all scopes and execute in defined order; allow early out when requested.

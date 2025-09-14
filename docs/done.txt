@@ -73,6 +73,15 @@ Session: Accuracy, Shotguns, Pages, Metrics, UX
 Session: Ammo System, Panels, Inventory UX
 - Ammo types: Added `register_ammo{ name,type,desc,sprite,size_x,size_y,speed,damage_mult,armor_pen,shield_mult,range,falloff_start,falloff_end,falloff_min_mult,pierce_count, on_hit,on_hit_entity,on_hit_tile }`.
 
+Refactor: Lua (sol2 only), Audio/Sounds, Graphics Assets (2025-09)
+-----------------------------------------
+
+- LuaManager: removed legacy Lua C API paths; sol2‑only with `sol::protected_function` for all callbacks; protected calls with error logging.
+- Lua context: added RAII guard to set/clear per‑call `state`/`player` context used by API functions.
+- Audio: merged sound store into `audio.hpp/cpp`; global `audio` with helpers; mod sounds loader moved into audio as `load_mod_sounds()`.
+- Graphics assets: Graphics now owns sprite registry/defs/textures with free helpers (`rebuild_sprite_registry`, `rebuild_sprites`, `load_all_textures`, `get_texture`).
+- Globals: simplified names in `globals.hpp` (`graphics`, `audio`, `lua_mgr`, `mm`, `binds`, `input_state`, `state`).
+
 Refactor: Globals and signatures (2025-09)
 -----------------------------------------
 

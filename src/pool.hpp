@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <optional>
 
-template <typename T, std::size_t N> class Pool {
+template <typename T, std::size_t N> struct Pool {
   public:
     Pool() {
         versions_.fill(1);
@@ -67,5 +67,5 @@ template <typename T, std::size_t N> class Pool {
 
   private:
     std::array<T, N> items_{};
-    std::array<std::uint32_t, N> versions_{};
+    std::array<uint32_t, N> versions_{};
 };

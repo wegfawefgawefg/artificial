@@ -12,7 +12,7 @@ struct Crate {
     int def_type{0};
 };
 
-class CratesPool {
+struct CratesPool {
   public:
     static constexpr std::size_t MAX = 256;
     CratesPool() {

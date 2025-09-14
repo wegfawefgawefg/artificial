@@ -44,7 +44,7 @@ static std::string trim(const std::string& s) {
     return s.substr(a, b - a);
 }
 
-void SpriteStore::rebuild_from(const std::vector<SpriteDef>& new_defs) {
+void Sprites::rebuild_from(const std::vector<SpriteDef>& new_defs) {
     // Determine if there are removals compared to current map.
     bool only_additions = true;
     if (!name_to_id.empty()) {
@@ -108,19 +108,19 @@ void SpriteStore::rebuild_from(const std::vector<SpriteDef>& new_defs) {
     defs_by_id.swap(new_defs_by_id);
 }
 
-int SpriteStore::try_get_id(const std::string& name) const {
+int Sprites::try_get_id(const std::string& name) const {
     auto it = name_to_id.find(name);
     return (it == name_to_id.end()) ? -1 : it->second;
 }
 
-const SpriteDef* SpriteStore::try_get_def(const std::string& name) const {
+const SpriteDef* Sprites::try_get_def(const std::string& name) const {
     int id = try_get_id(name);
     if (id < 0)
         return nullptr;
     return get_def_by_id(id);
 }
 
-const SpriteDef* SpriteStore::get_def_by_id(int id) const {
+const SpriteDef* Sprites::get_def_by_id(int id) const {
     if (id < 0)
         return nullptr;
     size_t idx = static_cast<size_t>(id);

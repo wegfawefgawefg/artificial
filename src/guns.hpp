@@ -35,7 +35,7 @@ struct GunInstance {
   int ammo_type{0};
 };
 
-class GunsPool : public Pool<GunInstance, 1024> {
+struct GunsPool : public Pool<GunInstance, 1024> {
   public:
     std::optional<VID> spawn_from_def(const GunDef& d) {
         auto v = alloc();
@@ -76,7 +76,7 @@ struct GroundGun {
     int sprite_id{-1};
 };
 
-class GroundGunsPool {
+struct GroundGunsPool {
   public:
     static constexpr std::size_t MAX = 1024;
     GroundGunsPool() {

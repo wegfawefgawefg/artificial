@@ -1,6 +1,6 @@
 #pragma once
 
-struct RuntimeSettings {
+struct Settings {
     float frames_per_second{144.0f};
     float timestep{1.0f / 144.0f};
     float camera_follow_factor{0.25f};

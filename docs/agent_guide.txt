@@ -100,15 +100,18 @@ Coding Conventions / Guidelines
 - Maintain separate‑axis resolution for tile collisions.
 - Keep pools capped (1024 entities/projectiles) unless explicitly changed.
 - Respect strict warnings; fix conversions explicitly (static_cast<>) to keep -Werror clean.
+- Lua: sol2‑only; store callbacks as `sol::protected_function`; avoid raw Lua C API.
+  - Use a small RAII guard for per‑call player/state context.
 
 Where To Add Things
 -------------------
-- Simulation: moved into `sim.cpp` helpers called from the fixed-step loop (movement/collision; shield regen + reloads; drop mode toggle; number-row equip/select; ground repulsion; crate open; projectile step).
+- Simulation: in `sim.cpp` helpers called from the fixed-step loop (movement/collision; shield regen + reloads; drop mode toggle; number-row equip/select; ground repulsion; crate open; projectile step).
 - New entity/projectile fields: entity.hpp / projectiles.hpp.
 - Spawn/iterate: entities.cpp pool; main loop drives logic.
 - Keyboard remaps: tokens in config.cpp; use InputBindings.
 - Tile behavior: stage.hpp (add flags/metadata).
-- Sprites/Textures: sprites.* for defs/ids, tex.* for textures; IDs remain ints.
+- Assets: graphics owns sprite registry/defs/textures; use helpers in `graphics.cpp`.
+- Audio: use `audio.hpp/cpp` helpers; `load_mod_sounds()` scans mods.
 - Mod loader: mods.* and mods/ tree.
 
 Open Work

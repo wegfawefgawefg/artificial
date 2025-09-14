@@ -5,7 +5,7 @@
 #include <optional>
 #include <vector>
 
-class Entities {
+struct Entities {
   public:
     static constexpr std::size_t MAX = 1024;
 

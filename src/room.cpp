@@ -12,28 +12,27 @@
 #include <random>
 
 void generate_room() {
-    auto& state = *g_state;
-    auto& gfx = *g_gfx;
     // Reset world
-    state.projectiles = Projectiles{};
-    state.entities = Entities{};
-    state.player_vid.reset();
-    state.start_tile = {-1, -1};
-    state.exit_tile = {-1, -1};
-    state.exit_countdown = -1.0f;
-    state.score_ready_timer = 0.0f;
-    state.pickups.clear();
-    state.ground_items.clear();
+    ss->gun_cooldown = 0.0f;
+    ss->projectiles = Projectiles{};
+    ss->entities = Entities{};
+    ss->player_vid.reset();
+    ss->start_tile = {-1, -1};
+    ss->exit_tile = {-1, -1};
+    ss->exit_countdown = -1.0f;
+    ss->score_ready_timer = 0.0f;
+    ss->pickups.clear();
+    ss->ground_items.clear();
     // Rebuild stage
     // Random dimensions between 32 and 64
     std::mt19937 rng{std::random_device{}()};
     std::uniform_int_distribution<int> dwh(32, 64);
-    std::uint32_t W = static_cast<std::uint32_t>(dwh(rng));
-    std::uint32_t H = static_cast<std::uint32_t>(dwh(rng));
-    state.stage = Stage(W, H);
+    uint32_t W = static_cast<uint32_t>(dwh(rng));
+    uint32_t H = static_cast<uint32_t>(dwh(rng));
+    ss->stage = Stage(W, H);
     // Reset per-stage metrics for a fresh room
-    state.metrics.reset(Entities::MAX);
-    state.stage.fill_border(TileProps::Make(true, true));
+    ss->metrics.reset(Entities::MAX);
+    ss->stage.fill_border(TileProps::Make(true, true));
     // sprinkle obstacles (walls and voids)
     int tiles = static_cast<int>(W * H);
     int obstacles = tiles / 8; // ~12.5%
@@ -50,7 +49,7 @@ void generate_room() {
     int start_idx = -1, exit_idx = -1;
     for (int i = 0; i < (int)corners.size(); ++i) {
         auto c = corners[static_cast<size_t>(i)];
-        if (state.stage.in_bounds(c.x, c.y) && !state.stage.at(c.x, c.y).blocks_entities()) {
+        if (ss->stage.in_bounds(c.x, c.y) && !ss->stage.at(c.x, c.y).blocks_entities()) {
             start_idx = i;
             break;
         }
@@ -59,7 +58,7 @@ void generate_room() {
         if (i == start_idx)
             continue;
         auto c = corners[static_cast<size_t>(i)];
-        if (state.stage.in_bounds(c.x, c.y) && !state.stage.at(c.x, c.y).blocks_entities()) {
+        if (ss->stage.in_bounds(c.x, c.y) && !ss->stage.at(c.x, c.y).blocks_entities()) {
             exit_idx = i;
             break;
         }
@@ -67,61 +66,59 @@ void generate_room() {
     if (start_idx < 0) {
         start_idx = 0;
         auto c = corners[static_cast<size_t>(0)];
-        state.stage.at(c.x, c.y) = TileProps::Make(false, false);
+        ss->stage.at(c.x, c.y) = TileProps::Make(false, false);
     }
     if (exit_idx < 0 || exit_idx == start_idx) {
         exit_idx = (start_idx + 3) % 4;
         auto c = corners[static_cast<size_t>(exit_idx)];
-        state.stage.at(c.x, c.y) = TileProps::Make(false, false);
+        ss->stage.at(c.x, c.y) = TileProps::Make(false, false);
     }
 
-    state.start_tile = corners[static_cast<size_t>(start_idx)];
-    state.exit_tile = corners[static_cast<size_t>(exit_idx)];
+    ss->start_tile = corners[static_cast<size_t>(start_idx)];
+    ss->exit_tile = corners[static_cast<size_t>(exit_idx)];
     // Place obstacles now, avoiding start/exit tiles
     for (int i = 0; i < obstacles; ++i) {
         int x = dx(rng);
         int y = dy(rng);
-        if ((x == state.start_tile.x && y == state.start_tile.y) ||
-            (x == state.exit_tile.x && y == state.exit_tile.y)) {
+        if ((x == ss->start_tile.x && y == ss->start_tile.y) ||
+            (x == ss->exit_tile.x && y == ss->exit_tile.y)) {
             continue;
         }
         int t = type(rng);
         if (t <= 1) {
-            state.stage.at(x, y) = TileProps::Make(true, false); // void/water: blocks entities only
+            ss->stage.at(x, y) = TileProps::Make(true, false); // void/water: blocks entities only
         } else {
-            state.stage.at(x, y) = TileProps::Make(true, true); // wall: blocks both
+            ss->stage.at(x, y) = TileProps::Make(true, true); // wall: blocks both
         }
     }
 
     // Create player at start
-    if (auto pvid = state.entities.new_entity()) {
-        Entity* p = state.entities.get_mut(*pvid);
+    if (auto pvid = ss->entities.new_entity()) {
+        Entity* p = ss->entities.get_mut(*pvid);
         p->type_ = ids::ET_PLAYER;
         p->size = {0.25f, 0.25f};
-        p->pos = {static_cast<float>(state.start_tile.x) + 0.5f,
-                  static_cast<float>(state.start_tile.y) + 0.5f};
-        if (g_sprite_ids)
-            p->sprite_id = g_sprite_ids->try_get("base:player");
+        p->pos = {static_cast<float>(ss->start_tile.x) + 0.5f,
+                  static_cast<float>(ss->start_tile.y) + 0.5f};
+        p->sprite_id = try_get_sprite_id("base:player");
         p->max_hp = 1000;
         p->health = p->max_hp;
         p->shield = p->stats.shield_max;
-        state.player_vid = pvid;
+        ss->player_vid = pvid;
     }
 
     // Spawn some NPCs
     {
         std::mt19937 rng2{std::random_device{}()};
-        std::uniform_int_distribution<int> dx2(1, (int)state.stage.get_width() - 2);
-        std::uniform_int_distribution<int> dy2(1, (int)state.stage.get_height() - 2);
+        std::uniform_int_distribution<int> dx2(1, (int)ss->stage.get_width() - 2);
+        std::uniform_int_distribution<int> dy2(1, (int)ss->stage.get_height() - 2);
         for (int i = 0; i < 25; ++i) {
-            auto vid = state.entities.new_entity();
+            auto vid = ss->entities.new_entity();
             if (!vid)
                 break;
-            Entity* e = state.entities.get_mut(*vid);
+            Entity* e = ss->entities.get_mut(*vid);
             e->type_ = ids::ET_NPC;
             e->size = {0.25f, 0.25f};
-            if (g_sprite_ids)
-                e->sprite_id = g_sprite_ids->try_get("base:zombie");
+            e->sprite_id = try_get_sprite_id("base:zombie");
             // Beef up NPC durability for clearer damage visualization
             e->max_hp = 2000;
             e->health = e->max_hp;
@@ -130,7 +127,7 @@ void generate_room() {
             e->stats.plates = 5;
             for (int tries = 0; tries < 100; ++tries) {
                 int x = dx2(rng2), y = dy2(rng2);
-                if (!state.stage.at(x, y).blocks_entities()) {
+                if (!ss->stage.at(x, y).blocks_entities()) {
                     e->pos = {static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f};
                     break;
                 }
@@ -139,78 +136,74 @@ void generate_room() {
     }
 
     // Camera to player and zoom for ~8%
-    if (gfx.renderer && state.player_vid) {
+    if (ss->player_vid) {
         int ww = 0, wh = 0;
-        SDL_GetRendererOutputSize(gfx.renderer, &ww, &wh);
+        SDL_GetRendererOutputSize(gg->renderer, &ww, &wh);
         float min_dim = static_cast<float>(std::min(ww, wh));
-        const Entity* p = state.entities.get(*state.player_vid);
+        const Entity* p = ss->entities.get(*ss->player_vid);
         if (p) {
             float desired_px = 0.08f * min_dim;
             float zoom = desired_px / (p->size.y * TILE_SIZE);
             zoom = std::clamp(zoom, 0.5f, 32.0f);
-            gfx.play_cam.zoom = zoom;
-            gfx.play_cam.pos = p->pos;
+            gg->play_cam.zoom = zoom;
+            gg->play_cam.pos = p->pos;
         }
     }
 
     // Spawn a few Lua-defined pickups/items near start for testing
     {
-        glm::vec2 base = {static_cast<float>(state.start_tile.x) + 0.5f,
-                          static_cast<float>(state.start_tile.y) + 0.5f};
+        glm::vec2 base = {static_cast<float>(ss->start_tile.x) + 0.5f,
+                          static_cast<float>(ss->start_tile.y) + 0.5f};
         auto place = [&](glm::vec2 offs) { return ensure_not_in_block(base + offs); };
-        if (g_lua_mgr && !g_lua_mgr->powerups().empty()) {
-            auto& pu = g_lua_mgr->powerups()[0];
-            auto* p = state.pickups.spawn(static_cast<std::uint32_t>(pu.type), pu.name,
+        if (luam && !luam->powerups().empty()) {
+            auto& pu = luam->powerups()[0];
+            auto* p = ss->pickups.spawn(static_cast<uint32_t>(pu.type), pu.name,
                                           place({1.0f, 0.0f}));
-            if (p && g_sprite_ids) {
+            if (p) {
                 if (!pu.sprite.empty() && pu.sprite.find(':') != std::string::npos)
-                    p->sprite_id = g_sprite_ids->try_get(pu.sprite);
+                    p->sprite_id = try_get_sprite_id(pu.sprite);
                 else
                     p->sprite_id = -1;
             }
         }
-        if (g_lua_mgr && g_lua_mgr->powerups().size() > 1) {
-            auto& pu = g_lua_mgr->powerups()[1];
-            auto* p = state.pickups.spawn(static_cast<std::uint32_t>(pu.type), pu.name,
+        if (luam && luam->powerups().size() > 1) {
+            auto& pu = luam->powerups()[1];
+            auto* p = ss->pickups.spawn(static_cast<uint32_t>(pu.type), pu.name,
                                           place({0.0f, 1.0f}));
-            if (p && g_sprite_ids) {
+            if (p) {
                 if (!pu.sprite.empty() && pu.sprite.find(':') != std::string::npos)
-                    p->sprite_id = g_sprite_ids->try_get(pu.sprite);
+                    p->sprite_id = try_get_sprite_id(pu.sprite);
                 else
                     p->sprite_id = -1;
             }
         }
         // Place example guns near spawn: pistol and rifle if present in Lua
-        if (g_lua_mgr && !g_lua_mgr->guns().empty()) {
-            auto gd = g_lua_mgr->guns()[0];
-            auto gv = state.guns.spawn_from_def(gd);
+        if (luam && !luam->guns().empty()) {
+            auto gd = luam->guns()[0];
+            auto gv = ss->guns.spawn_from_def(gd);
             int sid = -1;
-            if (g_sprite_ids) {
-                if (!gd.sprite.empty() && gd.sprite.find(':') != std::string::npos)
-                    sid = g_sprite_ids->try_get(gd.sprite);
-            }
+            if (!gd.sprite.empty() && gd.sprite.find(':') != std::string::npos)
+                sid = try_get_sprite_id(gd.sprite);
             if (gv)
-                state.ground_guns.spawn(*gv, place({2.0f, 0.0f}), sid);
+                ss->ground_guns.spawn(*gv, place({2.0f, 0.0f}), sid);
         }
-        if (g_lua_mgr && g_lua_mgr->guns().size() > 1) {
-            auto gd = g_lua_mgr->guns()[1];
-            auto gv = state.guns.spawn_from_def(gd);
+        if (luam && luam->guns().size() > 1) {
+            auto gd = luam->guns()[1];
+            auto gv = ss->guns.spawn_from_def(gd);
             int sid = -1;
-            if (g_sprite_ids) {
-                if (!gd.sprite.empty() && gd.sprite.find(':') != std::string::npos)
-                    sid = g_sprite_ids->try_get(gd.sprite);
-            }
+            if (!gd.sprite.empty() && gd.sprite.find(':') != std::string::npos)
+                sid = try_get_sprite_id(gd.sprite);
             if (gv)
-                state.ground_guns.spawn(*gv, place({0.0f, 2.0f}), sid);
+                ss->ground_guns.spawn(*gv, place({0.0f, 2.0f}), sid);
         }
         // TEMP: spawn player with three shotguns for testing
-        if (g_lua_mgr && state.player_vid) {
-            Entity* p = state.entities.get_mut(*state.player_vid);
+        if (luam && ss->player_vid) {
+            Entity* p = ss->entities.get_mut(*ss->player_vid);
             auto add_gun_to_inv = [&](int gun_type) {
-                for (auto const& g : g_lua_mgr->guns()) {
+                for (auto const& g : luam->guns()) {
                     if (g.type == gun_type) {
-                        if (auto gv = state.guns.spawn_from_def(g)) {
-                            state.inventory.insert_existing(INV_GUN, *gv);
+                        if (auto gv = ss->guns.spawn_from_def(g)) {
+                            ss->inventory.insert_existing(INV_GUN, *gv);
                             return *gv;
                         }
                     }
@@ -229,14 +222,13 @@ void generate_room() {
             }
         }
         // Let Lua generate room content (crates, loot, etc.) if function is present
-        if (g_lua_mgr)
-            g_lua_mgr->call_generate_room();
+        if (luam)
+            luam->call_generate_room();
     }
 }
 
 bool tile_blocks_entity(int x, int y) {
-    auto& state = *g_state;
-    return !state.stage.in_bounds(x, y) || state.stage.at(x, y).blocks_entities();
+    return !ss->stage.in_bounds(x, y) || ss->stage.at(x, y).blocks_entities();
 }
 
 glm::ivec2 nearest_walkable_tile(glm::ivec2 t, int max_radius) {

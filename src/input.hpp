@@ -6,6 +6,15 @@
 
 #include <SDL2/SDL.h>
 
+struct KeyEdge {
+    bool prev = false;
+    bool toggle(bool now, bool& flag) {
+        if (now && !prev) flag = !flag;
+        prev = now;
+        return flag;
+    }
+};
+
 struct InputBindings {
     SDL_Scancode left = SDL_SCANCODE_A;
     SDL_Scancode right = SDL_SCANCODE_D;
@@ -24,11 +33,13 @@ struct InputBindings {
     SDL_Scancode dash = SDL_SCANCODE_LSHIFT;
 };
 
-struct InputContext {
+struct InputState {
     float wheel_delta{0.0f};
 };
 
-void process_events(SDL_Event& ev, bool& request_quit);
-// Reads from globals: g_binds, g_input, g_state, g_gfx
-void build_inputs();
-void process_input_per_mode();
+void process_event(SDL_Event& ev);
+void collect_inputs();
+void process_inputs();
+
+void process_inputs_title();
+void process_inputs_playing();

@@ -7,19 +7,19 @@
 
 struct Pickup {
     bool active{false};
-    std::uint32_t type{0};
+    uint32_t type{0};
     std::string name{};
     glm::vec2 pos{0.0f, 0.0f};
     int sprite_id{-1};
 };
 
-class PickupsPool {
+struct PickupsPool {
   public:
     static constexpr std::size_t MAX = 1024;
     PickupsPool() {
         items.resize(MAX);
     }
-    Pickup* spawn(std::uint32_t type, const std::string& name, glm::vec2 pos) {
+    Pickup* spawn(uint32_t type, const std::string& name, glm::vec2 pos) {
         for (auto& it : items)
             if (!it.active) {
                 it.active = true;

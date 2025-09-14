@@ -53,8 +53,11 @@ struct SpriteIdRegistry {
 };
 
 // Rich sprite store that absorbs name<->ID mapping and holds SpriteDef metadata.
-class SpriteStore {
-  public:
+struct Sprites {
+    std::unordered_map<std::string, int> name_to_id;
+    std::vector<std::string> id_to_name;
+    std::vector<SpriteDef> defs_by_id;
+
     // Rebuild store from new definitions.
     // If only additions are detected (no removals), preserve existing IDs.
     void rebuild_from(const std::vector<SpriteDef>& new_defs);
@@ -74,11 +77,6 @@ class SpriteStore {
     const std::vector<std::string>& names_by_id() const {
         return id_to_name;
     }
-
-  private:
-    std::unordered_map<std::string, int> name_to_id;
-    std::vector<std::string> id_to_name;
-    std::vector<SpriteDef> defs_by_id;
 };
 
 // Parsing helpers (minimal tolerant parser for sidecar manifests)

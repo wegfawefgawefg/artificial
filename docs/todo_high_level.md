@@ -15,10 +15,16 @@ High-Level TODO
 - Decor: Add non-interactable decorations (z-sorted by Y); Lua placement API.
 
 Entity & Ammo Systems
-- Entity Type Defs (Lua): register entity types (player/classes/NPCs) with base stats including movement inaccuracy dynamics (inc/decay/max), accuracy, shield/armor, etc.; assign entities a type.
+- Entity Type Defs (Lua): register entity types (player/structes/NPCs) with base stats including movement inaccuracy dynamics (inc/decay/max), accuracy, shield/armor, etc.; assign entities a type.
 - Ammo Type Defs (Lua): define ammunition families + variants with stats/modifiers (damage, AP, speed, falloff, crit mods, shield/headshot/boss modifiers, ricochet/shrapnel profiles, bounce caps, range/lifespan/acceleration); expose curves for distance→multiplier (falloff).
 - Gun ↔ Ammo Compatibility: guns list compatible ammo types; inventory/loader picks the active ammo; UI shows current ammo and effects.
 - Cleanup & Tooling: Trim legacy paths; ASan/UBSan preset; small logging helper.
+- [Done] Remove legacy Lua C API; sol2 only in LuaManager.
+
+Engine Refactors (in progress)
+- Move firing cooldown from `State::gun_cooldown` to per-`GunInstance` (and per-entity for NPCs). Remove global gate to allow swap‑and‑shoot behavior.
+- Continue main loop cleanup: keep `main.cpp` as init → `sim_step()` → `render_frame()` → cleanup.
+- Consolidate texture access: remove remaining `tex.hpp`/`Textures` usages and use `graphics` helpers (`load_all_textures()`, `get_texture()`), then delete vestiges.
 
 Ticking (Opt-in) Roadmap
 - [Done] Per-def opt-in ticks for items/guns with `tick_rate_hz`, `tick_phase` (before/after). Initial host: player inventory.
@@ -35,7 +41,7 @@ Active Reload and Reload Lifecycle
 Dash & Movement
 - [Done] Dash with stocks and refill; Lua control for max/current; dash hooks.
 - [Done] Dash uses WASD 8-way direction and latches during dash.
-- [Next] Add per-class modifers (when classes land) to control dash stocks/refill.
+- [Next] Add per-struct modifers (when structes land) to control dash stocks/refill.
 
 HUD/UX
 - [Done] Three-row condition bars (Shield/Plates/Health) with counts and fixed width; dash is a fourth row with slivers + refill indicator.

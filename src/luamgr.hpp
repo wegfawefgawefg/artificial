@@ -2,14 +2,12 @@
 
 #include <string>
 #include <vector>
+#include <sol/sol.hpp>
 
 struct State;
 struct Entity;
-#ifdef GUB_USE_SOL2
-namespace sol {
-class state;
-}
-#endif
+namespace sol { struct state; }
+struct lua_State; // forward-declare C Lua state; provided by sol2 at runtime
 
 struct PowerupDef {
     std::string name;
@@ -29,18 +27,18 @@ struct ItemDef {
     // Optional ticking (opt-in)
     float tick_rate_hz{0.0f};
     std::string tick_phase; // "before" or "after" (default after)
-    int on_use_ref{-1}; // Lua registry ref to on_use function (optional)
-    int on_tick_ref{-1};
-    int on_shoot_ref{-1};
-    int on_damage_ref{-1};
-    int on_active_reload_ref{-1};
-    int on_failed_active_reload_ref{-1};
-    int on_tried_after_failed_ar_ref{-1};
-    int on_pickup_ref{-1};
-    int on_drop_ref{-1};
-    int on_eject_ref{-1};
-    int on_reload_start_ref{-1};
-    int on_reload_finish_ref{-1};
+    sol::protected_function on_use;
+    sol::protected_function on_tick;
+    sol::protected_function on_shoot;
+    sol::protected_function on_damage;
+    sol::protected_function on_active_reload;
+    sol::protected_function on_failed_active_reload;
+    sol::protected_function on_tried_after_failed_ar;
+    sol::protected_function on_pickup;
+    sol::protected_function on_drop;
+    sol::protected_function on_eject;
+    sol::protected_function on_reload_start;
+    sol::protected_function on_reload_finish;
 };
 struct AmmoCompat { int type{0}; float weight{1.0f}; };
 struct GunDef {
@@ -60,7 +58,7 @@ struct GunDef {
     std::string sound_reload;
     std::string sound_jam;
     std::string sound_pickup;
-    int on_jam_ref{-1};     // optional Lua callback
+    sol::protected_function on_jam;     // optional Lua callback
     float jam_chance{0.0f}; // per-gun additive jam chance
     int projectile_type{0}; // projectile def to use
     std::string fire_mode;  // "auto", "single", or "burst"
@@ -77,18 +75,18 @@ struct GunDef {
     float ar_size{0.15f};             // size 0..1
     float ar_size_variance{0.0f};     // +/- variance applied to size
     float active_reload_window{0.0f}; // legacy fallback for ar_size when >0
-    int on_active_reload_ref{-1};
-    int on_failed_active_reload_ref{-1};
-    int on_tried_after_failed_ar_ref{-1};
-    int on_pickup_ref{-1};
-    int on_drop_ref{-1};
-    int on_step_ref{-1};
+    sol::protected_function on_active_reload;
+    sol::protected_function on_failed_active_reload;
+    sol::protected_function on_tried_after_failed_ar;
+    sol::protected_function on_pickup;
+    sol::protected_function on_drop;
+    sol::protected_function on_step;
     // Optional ticking (opt-in)
     float tick_rate_hz{0.0f};
     std::string tick_phase; // "before" or "after" (default after)
-    int on_eject_ref{-1};
-    int on_reload_start_ref{-1};
-    int on_reload_finish_ref{-1};
+    sol::protected_function on_eject;
+    sol::protected_function on_reload_start;
+    sol::protected_function on_reload_finish;
     // Ammo compatibility (weighted pick on spawn)
     std::vector<AmmoCompat> compatible_ammo; // {type, weight}
 };
@@ -100,8 +98,8 @@ struct ProjectileDef {
     float size_x = 0.2f, size_y = 0.2f;
     int physics_steps = 2;
     std::string sprite; // namespaced sprite key (e.g., "mod:bullet")
-    int on_hit_entity_ref{-1};
-    int on_hit_tile_ref{-1};
+    sol::protected_function on_hit_entity;
+    sol::protected_function on_hit_tile;
 };
 
 // Ammo definitions (Lua)
@@ -124,9 +122,9 @@ struct AmmoDef {
     float falloff_min_mult{1.0f};   // min damage multiplier at/after falloff_end
     int pierce_count{0};            // number of entities to pierce through
     // Optional hooks
-    int on_hit_ref{-1};
-    int on_hit_entity_ref{-1};
-    int on_hit_tile_ref{-1};
+    sol::protected_function on_hit;
+    sol::protected_function on_hit_entity;
+    sol::protected_function on_hit_tile;
 };
 
 inline const GunDef* find_gun_def_by_type(const std::vector<GunDef>& defs, int type) {
@@ -153,16 +151,16 @@ struct CrateDef {
     float open_time = 5.0f;
     std::string label;
     DropTables drops;
-    int on_open_ref{-1};
+    sol::protected_function on_open;
 };
 
-class LuaManager {
+struct LuaManager {
   public:
     LuaManager();
     ~LuaManager();
     bool available() const;
     bool init();
-    bool load_mods(const std::string& mods_root);
+    bool load_mods();
     // Trigger calls
     bool call_item_on_use(int item_type, struct Entity& player, std::string* out_msg);
     void call_item_on_tick(int item_type, struct Entity& player, float dt);
@@ -277,21 +275,15 @@ class LuaManager {
     std::vector<AmmoDef> ammo_;
     std::vector<CrateDef> crates_;
     DropTables drops_;
-    int on_dash_ref{-1};
-    int on_active_reload_ref{-1};
-    int on_failed_active_reload_ref{-1};
-    int on_tried_after_failed_ar_ref{-1};
-    int on_step_ref{-1};
-    int on_eject_ref{-1};
-    int on_reload_start_ref{-1};
-    int on_reload_finish_ref{-1};
+    sol::protected_function on_dash;
+    sol::protected_function on_active_reload;
+    sol::protected_function on_failed_active_reload;
+    sol::protected_function on_tried_after_failed_ar;
+    sol::protected_function on_step;
+    sol::protected_function on_eject;
+    sol::protected_function on_reload_start;
+    sol::protected_function on_reload_finish;
 
-#ifdef GUB_ENABLE_LUA
-    struct lua_State* L{nullptr};
-#else
-    void* L{nullptr};
-#endif
-#ifdef GUB_USE_SOL2
+    lua_State* L{nullptr};
     sol::state* S{nullptr};
-#endif
 };

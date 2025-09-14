@@ -28,7 +28,7 @@ struct Projectile {
     int pierce_remaining{0}; // entities this projectile can still pass through
 };
 
-class Projectiles {
+struct Projectiles {
   public:
     static constexpr std::size_t MAX = 1024;
     Projectiles() : items(MAX) {
@@ -61,94 +61,72 @@ class Projectiles {
             pr.active = false;
     }
 
-    template <class HitEntityFn, class HitTileFn>
-    void step(float dt, const Stage& stage, const std::vector<Entity>& ents, HitEntityFn on_hit,
-              HitTileFn on_hit_tile) {
+    template <typename HitEntityFn, typename HitTileFn>
+    void step(float dt,
+              const Stage& stage,
+              const std::vector<Entity>& ents,
+              HitEntityFn&& on_hit,        // bool(Projectile&, const Entity&)
+              HitTileFn&& on_hit_tile) {   // void(Projectile&)
         for (auto& pr : items) {
-            if (!pr.active)
-                continue;
+            if (!pr.active) continue;
             int steps = std::max(1, pr.physics_steps);
             glm::vec2 step_dpos = pr.vel * (dt / static_cast<float>(steps));
             for (int s = 0; s < steps; ++s) {
-                // Range check: accumulate distance and expire if over range
-                pr.distance_travelled += std::sqrt(step_dpos.x * step_dpos.x + step_dpos.y * step_dpos.y);
+                pr.distance_travelled += std::sqrt(step_dpos.x*step_dpos.x + step_dpos.y*step_dpos.y);
                 if (pr.max_range_units > 0.0f && pr.distance_travelled >= pr.max_range_units) {
-                    pr.active = false;
-                    break;
+                    pr.active = false; break;
                 }
-                // Separate-axis move for projectiles
-                glm::vec2 next = pr.pos;
                 // X axis
+                glm::vec2 next = pr.pos;
                 next.x += step_dpos.x;
                 {
                     glm::vec2 half = 0.5f * pr.size;
                     glm::vec2 tl = {next.x - half.x, pr.pos.y - half.y};
                     glm::vec2 br = {next.x + half.x, pr.pos.y + half.y};
-                    int minx = (int)floorf(tl.x), miny = (int)floorf(tl.y),
-                        maxx = (int)floorf(br.x), maxy = (int)floorf(br.y);
+                    int minx = (int)std::floor(tl.x), miny = (int)std::floor(tl.y);
+                    int maxx = (int)std::floor(br.x), maxy = (int)std::floor(br.y);
                     bool blocked = false;
                     for (int y = miny; y <= maxy && !blocked; ++y)
                         for (int x = minx; x <= maxx; ++x)
-                            if (stage.in_bounds(x, y) && stage.at(x, y).blocks_projectiles()) {
+                            if (stage.in_bounds(x, y) && stage.at(x, y).blocks_projectiles())
                                 blocked = true;
-                            }
-                    if (blocked) {
-                        on_hit_tile(pr);
-                        pr.active = false;
-                        break;
-                    } else {
-                        pr.pos.x = next.x;
-                    }
+                    if (blocked) { on_hit_tile(pr); pr.active = false; break; }
+                    pr.pos.x = next.x;
                 }
-                if (!pr.active)
-                    break;
+                if (!pr.active) break;
                 // Y axis
                 next.y += step_dpos.y;
                 {
                     glm::vec2 half = 0.5f * pr.size;
                     glm::vec2 tl = {pr.pos.x - half.x, next.y - half.y};
                     glm::vec2 br = {pr.pos.x + half.x, next.y + half.y};
-                    int minx = (int)floorf(tl.x), miny = (int)floorf(tl.y),
-                        maxx = (int)floorf(br.x), maxy = (int)floorf(br.y);
+                    int minx = (int)std::floor(tl.x), miny = (int)std::floor(tl.y);
+                    int maxx = (int)std::floor(br.x), maxy = (int)std::floor(br.y);
                     bool blocked = false;
                     for (int y = miny; y <= maxy && !blocked; ++y)
                         for (int x = minx; x <= maxx; ++x)
-                            if (stage.in_bounds(x, y) && stage.at(x, y).blocks_projectiles()) {
+                            if (stage.in_bounds(x, y) && stage.at(x, y).blocks_projectiles())
                                 blocked = true;
-                            }
-                    if (blocked) {
-                        on_hit_tile(pr);
-                        pr.active = false;
-                        break;
-                    } else {
-                        pr.pos.y = next.y;
-                    }
+                    if (blocked) { on_hit_tile(pr); pr.active = false; break; }
+                    pr.pos.y = next.y;
                 }
-                if (!pr.active)
-                    break;
-                // entity hit (allow piercing through multiple entities)
+                if (!pr.active) break;
+                // Entities
                 for (auto const& e : ents) {
-                    if (!e.active)
-                        continue;
+                    if (!e.active) continue;
                     if (pr.owner && pr.owner->id == e.vid.id && pr.owner->version == e.vid.version)
                         continue;
                     glm::vec2 eh = e.half_size();
-                    glm::vec2 etl = e.pos - eh;
-                    glm::vec2 ebr = e.pos + eh;
+                    glm::vec2 etl = e.pos - eh, ebr = e.pos + eh;
                     glm::vec2 half = 0.5f * pr.size;
-                    glm::vec2 tl = pr.pos - half;
-                    glm::vec2 br = pr.pos + half;
+                    glm::vec2 tl = pr.pos - half, br = pr.pos + half;
                     bool overlap = !(br.x < etl.x || tl.x > ebr.x || br.y < etl.y || tl.y > ebr.y);
                     if (overlap) {
-                        bool stop = on_hit(pr, e); // on_hit returns true to stop, false to continue (pierce)
-                        if (stop) {
-                            pr.active = false;
-                            break;
-                        }
+                        bool stop = on_hit(pr, e);
+                        if (stop) { pr.active = false; break; }
                     }
                 }
-                if (!pr.active)
-                    break;
+                if (!pr.active) break;
             }
         }
     }

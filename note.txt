@@ -8,7 +8,7 @@ lightweight Lua spawn_crate API.
 modifiers (e.g., bouncy/poison/radiation), we can expand to a ProjectilePool with VID + per-instance
 tags. Current approach calls Lua hooks by def type, but we can pass richer context next.
 - Modifier model: We’ll integrate a unified modifier system to compute projectile effects from
-player-class, item, and gun scopes. For now, hooks exist so Lua can implement effects on hit.
+player-struct, item, and gun scopes. For now, hooks exist so Lua can implement effects on hit.
 - Crate variants: Add crate type per def and draw small tint or icon. Also add ammo/heal/explode
 crates via on_open.
 - Audio namespaces: If we want collisions avoided, stick to namespaced keys mod:name. I can add a

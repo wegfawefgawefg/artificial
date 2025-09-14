@@ -18,8 +18,8 @@ struct Entity {
     float rot{0.0f};
     bool horizontal_flip{false};
 
-    std::uint32_t health{1};
-    std::uint32_t max_hp{1};
+    uint32_t health{1};
+    uint32_t max_hp{1};
     float shield{0.0f}; // current shield (optional)
     float time_since_damage{0.0f};
     int physics_steps{1};

@@ -22,5 +22,5 @@ inline constexpr int ET_ITEM = 3;
 
 struct VID {
     std::size_t id{0};
-    std::uint32_t version{0};
+    uint32_t version{0};
 };
