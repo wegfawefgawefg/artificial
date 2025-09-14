@@ -18,6 +18,13 @@ bool init_mods_manager(const std::string& mods_root) {
     return true;
 }
 
+void cleanup_mods_manager() {
+    if (mm) {
+        delete mm;
+        mm = nullptr;
+    }
+}
+
 /// Discover available mods by scanning `mods/*/` for `info.toml`.
 /// Clears any previously discovered mods.
 void discover_mods() {
@@ -217,9 +224,9 @@ bool scan_mods_for_sprite_defs() {
 
 bool poll_fs_mods_hot_reload() {
     mm->accum_poll += ss->dt;
-    if (mm->accum_poll < static_cast<double>(HOT_RELOAD_POLL_INTERVAL))
+    if (mm->accum_poll < HOT_RELOAD_POLL_INTERVAL)
         return false;
-    mm->accum_poll = 0.0;
+    mm->accum_poll = 0.0f;
 
     std::vector<std::string> changed_assets;
     std::vector<std::string> changed_scripts;
@@ -233,8 +240,57 @@ bool poll_fs_mods_hot_reload() {
         scan_mods_for_sprite_defs();
     }
     if (!changed_scripts.empty()) {
-        std::printf("[mods] Script changes detected (%zu). Reloading behaviors (stub).\n",
+        std::printf("[mods] Script changes detected (%zu). Reloading Lua...\n",
                     changed_scripts.size());
+        if (luam) {
+            luam->load_mods();
+            // Update existing entities from defs (sprite, sizes, and stats)
+            for (auto& e : ss->entities.data()) {
+                if (!e.active || e.def_type == 0) continue;
+                if (const auto* ed = luam->find_entity_type(e.def_type)) {
+                    // Visuals and collider
+                    e.sprite_id = -1;
+                    if (!ed->sprite.empty() && ed->sprite.find(':') != std::string::npos)
+                        e.sprite_id = try_get_sprite_id(ed->sprite);
+                    e.sprite_size = {ed->sprite_w, ed->sprite_h};
+                    e.size = {ed->collider_w, ed->collider_h};
+                    // Preserve ratios when changing caps
+                    float hp_ratio = (e.max_hp > 0) ? ((float)e.health / (float)e.max_hp) : 0.0f;
+                    float sh_ratio = (e.stats.shield_max > 0.0f) ? (e.shield / e.stats.shield_max) : 0.0f;
+                    // Core caps and regen
+                    e.max_hp = ed->max_hp;
+                    e.health = (uint32_t)std::lround(hp_ratio * (float)e.max_hp);
+                    e.stats.health_regen = ed->health_regen;
+                    e.stats.shield_max = ed->shield_max;
+                    e.shield = ed->shield_max * sh_ratio;
+                    e.stats.shield_regen = ed->shield_regen;
+                    // Defense and movement
+                    e.stats.armor = ed->armor;
+                    e.stats.plates = ed->plates;
+                    e.stats.move_speed = ed->move_speed;
+                    e.stats.dodge = ed->dodge;
+                    // Economy/modifiers
+                    e.stats.scavenging = ed->scavenging;
+                    e.stats.currency = ed->currency;
+                    e.stats.ammo_gain = ed->ammo_gain;
+                    e.stats.luck = ed->luck;
+                    // Combat
+                    e.stats.crit_chance = ed->crit_chance;
+                    e.stats.crit_damage = ed->crit_damage;
+                    e.stats.headshot_damage = ed->headshot_damage;
+                    e.stats.damage_absorb = ed->damage_absorb;
+                    e.stats.damage_output = ed->damage_output;
+                    e.stats.healing = ed->healing;
+                    e.stats.accuracy = ed->accuracy;
+                    e.stats.terror_level = ed->terror_level;
+                    // Movement spread dynamics
+                    e.stats.move_spread_inc_rate_deg_per_sec_at_base = ed->move_spread_inc_rate_deg_per_sec_at_base;
+                    e.stats.move_spread_decay_deg_per_sec = ed->move_spread_decay_deg_per_sec;
+                    e.stats.move_spread_max_deg = ed->move_spread_max_deg;
+                }
+            }
+            ss->alerts.push_back({"Lua reloaded", 0.0f, 1.5f, false});
+        }
     }
     return true;
 }

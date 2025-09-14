@@ -102,6 +102,38 @@ drops = {
   }
 }
 
+-- Entity types
+register_entity_type{ name = "Zombie", type = 1, sprite = "base:zombie",
+  sprite_w = 0.25, sprite_h = 0.25, collider_w = 0.125, collider_h = 0.125,
+  physics_steps = 1, max_hp = 800, health_regen = 0.0,
+  shield_max = 0.0, shield_regen = 0.0, armor = 0.0, plates = 0,
+  move_speed = 280, dodge = 2.0, accuracy = 85,
+  scavenging = 100, currency = 100, ammo_gain = 100, luck = 100,
+  crit_chance = 3.0, crit_damage = 200.0, headshot_damage = 200.0,
+  damage_absorb = 100.0, damage_output = 100.0, healing = 100.0, terror_level = 100.0,
+  move_spread_inc_rate_deg_per_sec_at_base = 10.0,
+  move_spread_decay_deg_per_sec = 12.0, move_spread_max_deg = 22.0 }
+register_entity_type{ name = "Brute", type = 2, sprite = "base:zombie",
+  sprite_w = 0.35, sprite_h = 0.35, collider_w = 0.175, collider_h = 0.175,
+  physics_steps = 1, max_hp = 2200, health_regen = 0.0,
+  shield_max = 400, shield_regen = 80, armor = 15, plates = 2,
+  move_speed = 240, dodge = 1.0, accuracy = 80,
+  scavenging = 100, currency = 100, ammo_gain = 100, luck = 100,
+  crit_chance = 3.0, crit_damage = 200.0, headshot_damage = 200.0,
+  damage_absorb = 100.0, damage_output = 100.0, healing = 100.0, terror_level = 100.0,
+  move_spread_inc_rate_deg_per_sec_at_base = 9.0,
+  move_spread_decay_deg_per_sec = 10.0, move_spread_max_deg = 24.0 }
+register_entity_type{ name = "Drone", type = 3, sprite = "base:player",
+  sprite_w = 0.20, sprite_h = 0.20, collider_w = 0.10, collider_h = 0.10,
+  physics_steps = 1, max_hp = 500, health_regen = 0.0,
+  shield_max = 600, shield_regen = 200, armor = 5, plates = 0,
+  move_speed = 360, dodge = 5.0, accuracy = 95,
+  scavenging = 100, currency = 100, ammo_gain = 100, luck = 100,
+  crit_chance = 5.0, crit_damage = 200.0, headshot_damage = 200.0,
+  damage_absorb = 100.0, damage_output = 100.0, healing = 100.0, terror_level = 100.0,
+  move_spread_inc_rate_deg_per_sec_at_base = 7.0,
+  move_spread_decay_deg_per_sec = 12.0, move_spread_max_deg = 18.0 }
+
 -- Crates
 register_crate{ name="Med Crate", type=1, label="Med", open_time=5.0,
   drops = { items = { {type=100, weight=1.0}, {type=101, weight=0.5} } },
@@ -115,4 +147,14 @@ register_crate{ name="Ammo Crate", type=2, label="Ammo", open_time=5.0,
 function generate_room()
   api.spawn_crate_safe(1, 2.5, 0.5)
   api.spawn_crate_safe(2, 0.5, 2.5)
+  -- Spawn a mix of entities using defs
+  local W = 8
+  local H = 8
+  local types = {1,2,3}
+  for i=1,20 do
+    local tx = 1 + math.random(W)
+    local ty = 1 + math.random(H)
+    local t = types[1 + (i % #types)]
+    api.spawn_entity(t, tx + 4.0, ty + 4.0)
+  end
 end

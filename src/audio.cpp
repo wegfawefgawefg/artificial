@@ -43,8 +43,7 @@ void play_sound(const std::string& key, int loops, int channel, int volume) {
     Mix_PlayChannel(channel, it->second, loops);
 }
 
-void load_mod_sounds() {
-    auto mods_root = mm->root;
+void load_mod_sounds(const std::string& mods_root) {
 
     std::error_code ec;
     std::filesystem::path mroot = std::filesystem::path(mods_root);

@@ -154,6 +154,8 @@ int main(int argc, char** argv) {
     }
 
     cleanup_audio();
+    cleanup_mods_manager();
+    cleanup_state();
     cleanup_graphics();
     // TODO probably theres more cleanup to do that isnt done
     SDL_Quit();

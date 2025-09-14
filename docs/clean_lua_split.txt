@@ -1,0 +1,117 @@
+Here’s a clean way to slice up LuaManager without changing behavior, plus a migration order that’s fast to execute and easy to debug.
+
+Recommended layout
+
+- src/lua/ (new folder)
+    - lua_defs.hpp: Plain data structs used by mods
+    - PowerupDef, ItemDef, GunDef, AmmoDef, ProjectileDef, CrateDef, EntityTypeDef
+    - DropEntry, DropTables
+    - Keep sol types here (sol::protected_function) so other headers don’t need sol.
+- luamgr.hpp: Public class interface
+    - class LuaManager with containers, find_* helpers, and declarations for all call_* and register/init/load methods.
+    - Forward declare State, Entity; include lua_defs.hpp.
+- luamgr_loader.cpp: Core lifecycle
+    - LuaManager::{init, clear, load_mods, register_api, run_file, call_generate_room}
+    - Owns sol::state; opens libraries.
+- luamgr_register_items.cpp: register_item + add_item plumbing
+- luamgr_register_guns.cpp: register_gun + gun compat parsing
+- luamgr_register_ammo.cpp: register_ammo
+- luamgr_register_projectiles.cpp: register_projectile
+- luamgr_register_crates.cpp: register_crate + drops parsing
+- luamgr_register_entities.cpp: register_entity_type
+- luamgr_api_world.cpp: api spawn helpers
+    - api.spawn_crate, api.spawn_crate_safe (if kept), api.spawn_item, api.spawn_gun, api.spawn_entity, api.spawn_entity_force
+- luamgr_api_player.cpp: api helpers that mutate player state
+    - api.add_plate, api.heal, api.add_move_speed, dash APIs, ammo selection APIs, refill_ammo, etc.
+- luamgr_calls_items.cpp: call_item_* (use/tick/shoot/damage/AR hooks, pickup/drop/eject/reload hooks)
+- luamgr_calls_guns.cpp: call_gun_* (on_step, on_jam, reload hooks, etc.)
+- luamgr_calls_ammo.cpp: call_ammo_* (on_hit/on_hit_entity/on_hit_tile)
+- luamgr_calls_projectiles.cpp: call_projectile_* (on_hit_entity/on_hit_tile)
+- luamgr_calls_entities.cpp: call_entity_on_* (step/damage/spawn/death; reload/jam/out_of_ammo; thresholds; collide_tile)
+- lua_helpers.hpp/.cpp: small utilities
+    - safe get-or helpers for sol::table → C++ types, tiny log helper for sol::protected_function_result errors, common nearest-walkable finder, etc.
+
+Class and ownership boundaries
+
+- Keep LuaManager as the single public surface.
+    - Header stays slim: only declarations. No sol includes outside lua_defs.hpp.
+    - All heavy sol usage stays in the .cpp files above.
+- lua_defs.hpp contains the mod-facing structs and keeps sol::protected_function members. This centralizes the sol include.
+
+Lookup and containers
+
+- Keep current vectors in LuaManager for now to minimize changes:
+    - std::vector, items_, guns_, ammo_, projectiles_, crates_, entity_types_
+- Add optional maps as accelerators later:
+    - std::unordered_map<int, size_t> index by type → vector index (only if profiling shows need).
+    - Keep find_* methods as the sole lookup entrypoints to allow swapping internals.
+
+Binding registration organization
+
+- Each “register_” binding sits in its own register.cpp file and calls LuaManager::add_.
+- The single LuaManager::register_api() method calls helper functions:
+    - register_items_bindings(sol::state&, LuaManager&), register_guns_bindings(...), etc.
+
+API table organization
+
+- World-facing spawns in luamgr_api_world.cpp
+- Player-facing mutators (heal, plates, dash, ammo selection) in luamgr_api_player.cpp
+- These are added onto the same ‘api’ table inside register_api().
+
+Hook call organization
+
+- Keep the call_* methods as LuaManager methods implemented per-domain:
+    - Items: call_item_on_* (use, tick, shoot, damage, AR variants, pickup/drop/eject/reload)
+    - Guns: call_gun_on_* (jam, step, reload variants)
+    - Ammo: call_ammo_on_* (hit variants)
+    - Projectiles: call_projectile_on_* (hit variants)
+    - Entities: call_entity_on_* (step/damage/spawn/death, reload/jam/out_of_ammo, hp/shield thresholds, plates_lost, collide_tile)
+- Each calls.cpp implements its own cluster; this keeps compile units short and focused.
+
+Header hygiene
+
+- luamgr.hpp:
+    - Include only lua_defs.hpp and forward-declare sol::state (no heavy includes).
+- lua_defs.hpp:
+    - Include sol/sol.hpp and standard headers for the structs.
+
+File-by-file contents summary
+
+- lua_defs.hpp: All Def structs and Drop structs
+- luamgr.hpp: LuaManager class, declarations only
+- luamgr_loader.cpp: init/clear/load_mods/run_file/register_api; global hooks register_on_*
+- luamgr_register_[domain].cpp: register_* Lua functions → add_*()
+- luamgr_api_[world|player].cpp: api.* table functions
+- luamgr_calls_[domain].cpp: call_* implementation per domain
+- lua_helpers.[hpp|cpp]: tiny helpers for table parsing and error printing
+
+Migration order (low-risk)
+
+1. Extract lua_defs.hpp
+    - Move the Def structs and Drop structs from luamgr.hpp to lua_defs.hpp.
+    - Include lua_defs.hpp from luamgr.hpp; ensure build still passes.
+2. Split register_* bindings
+    - Create the five/six register.cpp files; move code from register_api() into per-domain registerers.
+    - Keep register_api() as an orchestrator that calls these per-domain functions.
+3. Split api.* bindings
+    - Create luamgr_api_world.cpp and luamgr_api_player.cpp; move the api.set_function bindings.
+4. Split call_* functions per domain
+    - Move call_* implementations to calls.cpp files.
+5. Move loader code
+    - Keep init/clear/run_file/load_mods in one file: luamgr_loader.cpp.
+6. Final: prune old monolithic luamgr.cpp (or leave as thin orchestrator)
+
+Notes / pitfalls to avoid
+
+- Don’t include sol/sol.hpp in headers except lua_defs.hpp (keeps compile costs down).
+- Watch GCC sign-conversion warnings (e.g., int → uint32_t) like we fixed for max_hp; keep the same pattern.
+- Keep LuaCtxGuard in a shared place (probably in luamgr_loader.cpp or a small internal header) and reuse in call_* modules.
+- Maintain existing behavior for hot reload: load_mods() + live entity refresh.
+
+Optional improvements (after the split)
+
+- Add inline helpers for table get: get_or_number, get_or_string, get_or_function to reduce repetitive code.
+- Add a small map for type→index to speed up find_* if needed.
+- Consider a PIMPL for LuaManager later to isolate sol and reduce rebuilds.
+
+If you go ahead with this split, ping me to fix any build issues after you shuffle the code. I’ll tighten includes and resolve missing symbols quickly.

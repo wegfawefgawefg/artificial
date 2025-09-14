@@ -1,0 +1,55 @@
+Detailing recent updates
+
+I fixed the zoom runaway issue by resetting the wheel delta and enabling per-frame
+scrolling. I also added several cleanup functions to improve graphics, such as clearing
+textures and deleting objects. Confirmed that the system runs headless, which is great!
+
+I suggest checking if the GUI zoom feels right and whether the zoom step size should
+consider scroll amount. We might also want to discuss clamping the zoom or adjusting
+increments for fluidity later. Everything else is functioning well!
+
+Considering plan updates
+
+I'm thinking about whether to implement updates based on the developer guide's mention
+of the update_plan tool. Since this task involves multiple changes, it does seem
+somewhat complex. Also, the last plan call was missed, but that's fine. I wonder if
+it's absolutely necessary to create a new update plan this time. It might help clarify
+the changes made, yet since it's optional, I'll respond without it unless the user
+specifies!
+
+
+codex
+Here’s what I fixed and why:
+
+
+- State lifetime: Allocates State on heap and keeps ss valid.
+    - src/state.cpp: ss = new State{}; added cleanup_state() to delete it.
+    - src/state.hpp: declared cleanup_state().
+    - src/main.cpp: calls cleanup_state() at shutdown.
+- Mods manager: Added cleanup to free mm.
+    - src/mods.hpp/cpp: cleanup_mods_manager() deletes mm.
+    - src/main.cpp: calls cleanup_mods_manager() at shutdown.
+- Graphics cleanup: Clears textures and deletes the Graphics object.
+    - src/graphics.cpp: clear_textures() before destroying renderer; delete gg and null
+it.
+
+Zoom Runaway (mouse wheel)
+
+- Root cause: wheel delta accumulator wasn’t reset, so zoom applied every frame.
+- Fix:
+    - src/input.cpp: collect_inputs() copies wheel_delta into one-frame
+mouse_inputs.scroll then resets wheel_delta to 0.
+    - src/input.cpp: process_inputs_playing() now uses mouse_inputs.scroll (per-frame)
+rather than the accumulator, preventing runaway zoom.
+
+Build/Run
+
+- Built successfully and ran a short headless session to sanity check init and cleanup
+paths:
+    - ./build/artificial --frames=2 runs and exits cleanly.
+
+Do you want me to:
+
+- Tune zoom increments (e.g., scale by abs(scroll) for fast wheels)?
+- Add a cleanup_lua() for symmetry if/when you heap-allocate the Lua manager?
+- Add small logs at shutdown to confirm each subsystem cleaned up?

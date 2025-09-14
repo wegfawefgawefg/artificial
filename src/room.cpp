@@ -96,7 +96,8 @@ void generate_room() {
     if (auto pvid = ss->entities.new_entity()) {
         Entity* p = ss->entities.get_mut(*pvid);
         p->type_ = ids::ET_PLAYER;
-        p->size = {0.25f, 0.25f};
+        p->size = {0.125f, 0.125f};
+        p->sprite_size = {0.25f, 0.25f};
         p->pos = {static_cast<float>(ss->start_tile.x) + 0.5f,
                   static_cast<float>(ss->start_tile.y) + 0.5f};
         p->sprite_id = try_get_sprite_id("base:player");
@@ -106,34 +107,7 @@ void generate_room() {
         ss->player_vid = pvid;
     }
 
-    // Spawn some NPCs
-    {
-        std::mt19937 rng2{std::random_device{}()};
-        std::uniform_int_distribution<int> dx2(1, (int)ss->stage.get_width() - 2);
-        std::uniform_int_distribution<int> dy2(1, (int)ss->stage.get_height() - 2);
-        for (int i = 0; i < 25; ++i) {
-            auto vid = ss->entities.new_entity();
-            if (!vid)
-                break;
-            Entity* e = ss->entities.get_mut(*vid);
-            e->type_ = ids::ET_NPC;
-            e->size = {0.25f, 0.25f};
-            e->sprite_id = try_get_sprite_id("base:zombie");
-            // Beef up NPC durability for clearer damage visualization
-            e->max_hp = 2000;
-            e->health = e->max_hp;
-            e->stats.shield_max = 500.0f;
-            e->shield = e->stats.shield_max;
-            e->stats.plates = 5;
-            for (int tries = 0; tries < 100; ++tries) {
-                int x = dx2(rng2), y = dy2(rng2);
-                if (!ss->stage.at(x, y).blocks_entities()) {
-                    e->pos = {static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f};
-                    break;
-                }
-            }
-        }
-    }
+    // NPCs are now spawned via Lua using api.spawn_entity_safe; if no entity defs exist, skip.
 
     // Camera to player and zoom for ~8%
     if (ss->player_vid) {
@@ -203,7 +177,7 @@ void generate_room() {
                 for (auto const& g : luam->guns()) {
                     if (g.type == gun_type) {
                         if (auto gv = ss->guns.spawn_from_def(g)) {
-                            ss->inventory.insert_existing(INV_GUN, *gv);
+                            if (ss->player_vid) if (auto* inv = ss->inv_for(*ss->player_vid)) inv->insert_existing(INV_GUN, *gv);
                             return *gv;
                         }
                     }

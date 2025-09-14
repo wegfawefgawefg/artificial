@@ -33,6 +33,7 @@ void LuaManager::clear() {
     guns_.clear();
     projectiles_.clear();
     ammo_.clear();
+    entity_types_.clear();
 }
 
 bool LuaManager::init() {
@@ -190,6 +191,64 @@ bool LuaManager::register_api() {
         if (auto o = t.get<sol::object>("on_hit_entity"); o.is<sol::function>()) d.on_hit_entity = o.as<sol::protected_function>();
         if (auto o = t.get<sol::object>("on_hit_tile"); o.is<sol::function>()) d.on_hit_tile = o.as<sol::protected_function>();
         add_projectile(d);
+    });
+    // Register entity types (NPC/player-capable)
+    s.set_function("register_entity_type", [this](sol::table t) {
+        EntityTypeDef d{};
+        d.name = t.get_or("name", std::string{});
+        d.type = t.get_or("type", 0);
+        d.sprite = t.get_or("sprite", std::string{});
+        d.sprite_w = t.get_or("sprite_w", 0.25f);
+        d.sprite_h = t.get_or("sprite_h", 0.25f);
+        d.collider_w = t.get_or("collider_w", 0.25f);
+        d.collider_h = t.get_or("collider_h", 0.25f);
+        d.physics_steps = t.get_or("physics_steps", 1);
+        {
+            int mhp = t.get_or("max_hp", 1000);
+            if (mhp < 0) mhp = 0;
+            d.max_hp = static_cast<uint32_t>(mhp);
+        }
+        d.shield_max = t.get_or("shield_max", 0.0f);
+        d.shield_regen = t.get_or("shield_regen", 0.0f);
+        d.health_regen = t.get_or("health_regen", 0.0f);
+        d.armor = t.get_or("armor", 0.0f);
+        d.plates = t.get_or("plates", 0);
+        d.move_speed = t.get_or("move_speed", 350.0f);
+        d.dodge = t.get_or("dodge", 3.0f);
+        d.accuracy = t.get_or("accuracy", 100.0f);
+        d.scavenging = t.get_or("scavenging", 100.0f);
+        d.currency = t.get_or("currency", 100.0f);
+        d.ammo_gain = t.get_or("ammo_gain", 100.0f);
+        d.luck = t.get_or("luck", 100.0f);
+        d.crit_chance = t.get_or("crit_chance", 3.0f);
+        d.crit_damage = t.get_or("crit_damage", 200.0f);
+        d.headshot_damage = t.get_or("headshot_damage", 200.0f);
+        d.damage_absorb = t.get_or("damage_absorb", 100.0f);
+        d.damage_output = t.get_or("damage_output", 100.0f);
+        d.healing = t.get_or("healing", 100.0f);
+        d.terror_level = t.get_or("terror_level", 100.0f);
+        d.move_spread_inc_rate_deg_per_sec_at_base = t.get_or("move_spread_inc_rate_deg_per_sec_at_base", 8.0f);
+        d.move_spread_decay_deg_per_sec = t.get_or("move_spread_decay_deg_per_sec", 10.0f);
+        d.move_spread_max_deg = t.get_or("move_spread_max_deg", 20.0f);
+        d.tick_rate_hz = t.get_or("tick_rate_hz", 0.0f);
+        d.tick_phase = t.get_or("tick_phase", std::string("after"));
+        if (auto o = t.get<sol::object>("on_step"); o.is<sol::function>()) d.on_step = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_damage"); o.is<sol::function>()) d.on_damage = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_spawn"); o.is<sol::function>()) d.on_spawn = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_death"); o.is<sol::function>()) d.on_death = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_reload_start"); o.is<sol::function>()) d.on_reload_start = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_reload_finish"); o.is<sol::function>()) d.on_reload_finish = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_gun_jam"); o.is<sol::function>()) d.on_gun_jam = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_out_of_ammo"); o.is<sol::function>()) d.on_out_of_ammo = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_hp_under_50"); o.is<sol::function>()) d.on_hp_under_50 = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_hp_under_25"); o.is<sol::function>()) d.on_hp_under_25 = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_hp_full"); o.is<sol::function>()) d.on_hp_full = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_shield_under_50"); o.is<sol::function>()) d.on_shield_under_50 = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_shield_under_25"); o.is<sol::function>()) d.on_shield_under_25 = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_shield_full"); o.is<sol::function>()) d.on_shield_full = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_plates_lost"); o.is<sol::function>()) d.on_plates_lost = o.as<sol::protected_function>();
+        if (auto o = t.get<sol::object>("on_collide_tile"); o.is<sol::function>()) d.on_collide_tile = o.as<sol::protected_function>();
+        add_entity_type(d);
     });
     s.set_function("register_crate", [this](sol::table t) {
         CrateDef d{};
@@ -506,6 +565,168 @@ bool LuaManager::register_api() {
             g_state_ctx->metrics.guns_spawned += 1;
         }
     });
+    // Spawn an entity by type at world coords (center). Safe placement.
+    api.set_function("spawn_entity_safe", [this](int type, float x, float y) {
+        if (!g_state_ctx)
+            return;
+        const EntityTypeDef* ed = find_entity_type(type);
+        if (!ed) {
+            if (g_state_ctx) g_state_ctx->alerts.push_back({std::string("Unknown entity type ") + std::to_string(type), 0.0f, 1.5f, false});
+            return;
+        }
+        auto tile_blocks = [&](int tx, int ty) {
+            return !g_state_ctx->stage.in_bounds(tx, ty) || g_state_ctx->stage.at(tx, ty).blocks_entities();
+        };
+        auto nearest = [&](int tx, int ty) {
+            if (!tile_blocks(tx, ty)) return glm::ivec2{tx, ty};
+            for (int r = 1; r <= 16; ++r) {
+                for (int dy = -r; dy <= r; ++dy) {
+                    int yy = ty + dy; int dx = r - std::abs(dy);
+                    for (int sx : {-dx, dx}) { int xx = tx + sx; if (!tile_blocks(xx, yy)) return glm::ivec2{xx, yy}; }
+                }
+            }
+            return glm::ivec2{tx, ty};
+        };
+        glm::ivec2 t{(int)std::floor(x), (int)std::floor(y)};
+        auto w = nearest(t.x, t.y);
+        glm::vec2 pos{(float)w.x + 0.5f, (float)w.y + 0.5f};
+        auto vid = g_state_ctx->entities.new_entity();
+        if (!vid) return;
+        Entity* e = g_state_ctx->entities.get_mut(*vid);
+        e->type_ = ids::ET_NPC;
+        e->pos = pos;
+        e->size = {ed->collider_w, ed->collider_h};
+        e->sprite_size = {ed->sprite_w, ed->sprite_h};
+        e->physics_steps = std::max(1, ed->physics_steps);
+        e->def_type = ed->type;
+        e->sprite_id = -1;
+        if (!ed->sprite.empty() && ed->sprite.find(':') != std::string::npos)
+            e->sprite_id = try_get_sprite_id(ed->sprite);
+        e->max_hp = ed->max_hp;
+        e->health = e->max_hp;
+        e->stats.shield_max = ed->shield_max;
+        e->shield = ed->shield_max;
+        e->stats.shield_regen = ed->shield_regen;
+        e->stats.health_regen = ed->health_regen;
+        e->stats.armor = ed->armor;
+        e->stats.plates = ed->plates;
+        e->stats.move_speed = ed->move_speed;
+        e->stats.dodge = ed->dodge;
+        e->stats.accuracy = ed->accuracy;
+        e->stats.scavenging = ed->scavenging;
+        e->stats.currency = ed->currency;
+        e->stats.ammo_gain = ed->ammo_gain;
+        e->stats.luck = ed->luck;
+        e->stats.crit_chance = ed->crit_chance;
+        e->stats.crit_damage = ed->crit_damage;
+        e->stats.headshot_damage = ed->headshot_damage;
+        e->stats.damage_absorb = ed->damage_absorb;
+        e->stats.damage_output = ed->damage_output;
+        e->stats.healing = ed->healing;
+        e->stats.terror_level = ed->terror_level;
+        e->stats.move_spread_inc_rate_deg_per_sec_at_base = ed->move_spread_inc_rate_deg_per_sec_at_base;
+        e->stats.move_spread_decay_deg_per_sec = ed->move_spread_decay_deg_per_sec;
+        e->stats.move_spread_max_deg = ed->move_spread_max_deg;
+        call_entity_on_spawn(type, *e);
+    });
+    // Alias: always safe; emits alert on failure
+    api.set_function("spawn_entity", [this](int type, float x, float y) {
+        if (!g_state_ctx) return;
+        const EntityTypeDef* ed = find_entity_type(type);
+        if (!ed) {
+            g_state_ctx->alerts.push_back({std::string("Unknown entity type ") + std::to_string(type), 0.0f, 1.5f, false});
+            return;
+        }
+        auto tile_blocks = [&](int tx, int ty) {
+            return !g_state_ctx->stage.in_bounds(tx, ty) || g_state_ctx->stage.at(tx, ty).blocks_entities();
+        };
+        auto nearest = [&](int tx, int ty) {
+            if (!tile_blocks(tx, ty)) return glm::ivec2{tx, ty};
+            for (int r = 1; r <= 16; ++r) {
+                for (int dy = -r; dy <= r; ++dy) {
+                    int yy = ty + dy; int dx = r - std::abs(dy);
+                    for (int sx : {-dx, dx}) { int xx = tx + sx; if (!tile_blocks(xx, yy)) return glm::ivec2{xx, yy}; }
+                }
+            }
+            return glm::ivec2{tx, ty};
+        };
+        glm::ivec2 t{(int)std::floor(x), (int)std::floor(y)};
+        auto w = nearest(t.x, t.y);
+        glm::vec2 pos{(float)w.x + 0.5f, (float)w.y + 0.5f};
+        auto vid = g_state_ctx->entities.new_entity();
+        if (!vid) { g_state_ctx->alerts.push_back({"Entity spawn failed", 0.0f, 1.5f, false}); return; }
+        Entity* e = g_state_ctx->entities.get_mut(*vid);
+        e->type_ = ids::ET_NPC;
+        e->pos = pos;
+        e->size = {ed->collider_w, ed->collider_h};
+        e->sprite_size = {ed->sprite_w, ed->sprite_h};
+        e->physics_steps = std::max(1, ed->physics_steps);
+        e->def_type = ed->type;
+        e->sprite_id = -1;
+        if (!ed->sprite.empty() && ed->sprite.find(':') != std::string::npos)
+            e->sprite_id = try_get_sprite_id(ed->sprite);
+        e->max_hp = ed->max_hp;
+        e->health = e->max_hp;
+        e->stats.shield_max = ed->shield_max;
+        e->shield = ed->shield_max;
+        e->stats.shield_regen = ed->shield_regen;
+        e->stats.health_regen = ed->health_regen;
+        e->stats.armor = ed->armor;
+        e->stats.plates = ed->plates;
+        e->stats.move_speed = ed->move_speed;
+        e->stats.dodge = ed->dodge;
+        e->stats.accuracy = ed->accuracy;
+        e->stats.scavenging = ed->scavenging;
+        e->stats.currency = ed->currency;
+        e->stats.ammo_gain = ed->ammo_gain;
+        e->stats.luck = ed->luck;
+        e->stats.crit_chance = ed->crit_chance;
+        e->stats.crit_damage = ed->crit_damage;
+        e->stats.headshot_damage = ed->headshot_damage;
+        e->stats.damage_absorb = ed->damage_absorb;
+        e->stats.damage_output = ed->damage_output;
+        e->stats.healing = ed->healing;
+        e->stats.terror_level = ed->terror_level;
+        e->stats.move_spread_inc_rate_deg_per_sec_at_base = ed->move_spread_inc_rate_deg_per_sec_at_base;
+        e->stats.move_spread_decay_deg_per_sec = ed->move_spread_decay_deg_per_sec;
+        e->stats.move_spread_max_deg = ed->move_spread_max_deg;
+        call_entity_on_spawn(type, *e);
+    });
+    // Force spawn: places at exact coordinates without safe adjustment
+    api.set_function("spawn_entity_force", [this](int type, float x, float y) {
+        if (!g_state_ctx) return;
+        const EntityTypeDef* ed = find_entity_type(type);
+        if (!ed) {
+            g_state_ctx->alerts.push_back({std::string("Unknown entity type ") + std::to_string(type), 0.0f, 1.5f, false});
+            return;
+        }
+        glm::vec2 pos{x, y};
+        auto vid = g_state_ctx->entities.new_entity();
+        if (!vid) { g_state_ctx->alerts.push_back({"Entity spawn failed", 0.0f, 1.5f, false}); return; }
+        Entity* e = g_state_ctx->entities.get_mut(*vid);
+        e->type_ = ids::ET_NPC;
+        e->pos = pos;
+        e->size = {ed->collider_w, ed->collider_h};
+        e->sprite_size = {ed->sprite_w, ed->sprite_h};
+        e->physics_steps = std::max(1, ed->physics_steps);
+        e->def_type = ed->type;
+        e->sprite_id = -1;
+        if (!ed->sprite.empty() && ed->sprite.find(':') != std::string::npos)
+            e->sprite_id = try_get_sprite_id(ed->sprite);
+        e->max_hp = ed->max_hp;
+        e->health = e->max_hp;
+        e->stats.shield_max = ed->shield_max;
+        e->shield = ed->shield_max;
+        e->stats.shield_regen = ed->shield_regen;
+        e->stats.armor = ed->armor;
+        e->stats.plates = ed->plates;
+        e->stats.move_speed = ed->move_speed;
+        e->stats.accuracy = ed->accuracy;
+        e->stats.move_spread_inc_rate_deg_per_sec_at_base = ed->move_spread_inc_rate_deg_per_sec_at_base;
+        e->stats.move_spread_decay_deg_per_sec = ed->move_spread_decay_deg_per_sec;
+        e->stats.move_spread_max_deg = ed->move_spread_max_deg;
+        call_entity_on_spawn(type, *e);
+    });
     return true;
 }
 
@@ -640,6 +861,107 @@ void LuaManager::call_on_reload_finish(Entity& player) {
         if (obj.is<sol::function>()) { auto r = obj.as<sol::protected_function>()(); if (!r.valid()) { sol::error e = r; std::fprintf(stderr, "[lua] on_reload_finish error: %s\n", e.what()); } }
     }
     (void)0;
+}
+
+void LuaManager::call_entity_on_step(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_step.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_step(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_step error: %s\n", er.what()); }
+}
+
+void LuaManager::call_entity_on_damage(int entity_type, Entity& e, int attacker_ap) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_damage.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_damage(attacker_ap); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_damage error: %s\n", er.what()); }
+}
+
+void LuaManager::call_entity_on_spawn(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_spawn.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_spawn(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_spawn error: %s\n", er.what()); }
+}
+
+void LuaManager::call_entity_on_death(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_death.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_death(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_death error: %s\n", er.what()); }
+}
+
+void LuaManager::call_entity_on_reload_start(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_reload_start.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_reload_start(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_reload_start error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_reload_finish(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_reload_finish.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_reload_finish(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_reload_finish error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_gun_jam(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_gun_jam.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_gun_jam(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_gun_jam error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_out_of_ammo(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_out_of_ammo.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_out_of_ammo(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_out_of_ammo error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_hp_under_50(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_hp_under_50.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_hp_under_50(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_hp_under_50 error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_hp_under_25(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_hp_under_25.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_hp_under_25(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_hp_under_25 error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_hp_full(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_hp_full.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_hp_full(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_hp_full error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_shield_under_50(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_shield_under_50.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_shield_under_50(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_shield_under_50 error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_shield_under_25(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_shield_under_25.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_shield_under_25(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_shield_under_25 error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_shield_full(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_shield_full.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_shield_full(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_shield_full error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_plates_lost(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_plates_lost.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_plates_lost(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_plates_lost error: %s\n", er.what()); }
+}
+void LuaManager::call_entity_on_collide_tile(int entity_type, Entity& e) {
+    const EntityTypeDef* ed = find_entity_type(entity_type);
+    if (!ed || !ed->on_collide_tile.valid()) return;
+    LuaCtxGuard _ctx(ss, &e);
+    auto r = ed->on_collide_tile(); if (!r.valid()) { sol::error er = r; std::fprintf(stderr, "[lua] entity on_collide_tile error: %s\n", er.what()); }
 }
 
 void LuaManager::call_gun_on_eject(int gun_type, Entity& player) {
@@ -835,8 +1157,8 @@ bool LuaManager::load_mods() {
             }
         }
     }
-    std::printf("[lua] loaded: %zu powerups, %zu items, %zu guns, %zu ammo, %zu projectiles\n",
-                powerups_.size(), items_.size(), guns_.size(), ammo_.size(), projectiles_.size());
+    std::printf("[lua] loaded: %zu powerups, %zu items, %zu guns, %zu ammo, %zu projectiles, %zu entity types\n",
+                powerups_.size(), items_.size(), guns_.size(), ammo_.size(), projectiles_.size(), entity_types_.size());
     // Optional drop tables
     drops_.powerups.clear();
     drops_.items.clear();

@@ -14,7 +14,10 @@ struct Entity {
 
     glm::vec2 pos{0.0f, 0.0f};
     glm::vec2 vel{0.0f, 0.0f};
+    // Collider (physics/hitbox) size in world units
     glm::vec2 size{1.0f, 1.0f};
+    // Optional sprite draw size in world units; if <=0, falls back to collider size
+    glm::vec2 sprite_size{-1.0f, -1.0f};
     float rot{0.0f};
     bool horizontal_flip{false};
 
@@ -24,9 +27,18 @@ struct Entity {
     float time_since_damage{0.0f};
     int physics_steps{1};
     int sprite_id{-1};
+    int def_type{0}; // entity type def id from Lua (if any)
+    float tick_acc_entity{0.0f}; // for per-entity Lua ticks
+    // Threshold tracking for hooks
+    float last_hp_ratio{1.0f};
+    float last_shield_ratio{1.0f};
+    int last_plates{-1};
 
     inline glm::vec2 half_size() const {
         return 0.5f * size;
+    }
+    inline glm::vec2 draw_size() const {
+        return (sprite_size.x > 0.0f && sprite_size.y > 0.0f) ? sprite_size : size;
     }
 
     // Basic stat block (inspired by SYNTHETIK style). Units are engine-defined.

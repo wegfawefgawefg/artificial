@@ -159,16 +159,27 @@ void render() {
             // sprite if available
             bool drew_sprite = false;
             if (e.sprite_id >= 0) {
-                SDL_Texture* tex = (textures ? textures->get(e.sprite_id) : nullptr);
+                SDL_Texture* tex = get_texture(e.sprite_id);
                 if (tex) {
                     int tw = 0, th = 0;
                     SDL_QueryTexture(tex, nullptr, nullptr, &tw, &th);
-                    SDL_FPoint c = world_to_screen(e.pos.x - e.size.x * 0.5f, e.pos.y - e.size.y * 0.5f);
+                    glm::vec2 ds = e.draw_size();
+                    SDL_FPoint c = world_to_screen(e.pos.x - ds.x * 0.5f, e.pos.y - ds.y * 0.5f);
                     float scale = TILE_SIZE * gg->play_cam.zoom;
                     SDL_Rect dst{(int)std::floor(c.x), (int)std::floor(c.y),
-                                 (int)std::ceil(e.size.x * scale), (int)std::ceil(e.size.y * scale)};
+                                 (int)std::ceil(ds.x * scale), (int)std::ceil(ds.y * scale)};
                     SDL_RenderCopy(renderer, tex, nullptr, &dst);
                     drew_sprite = true;
+                    // Overlay: light grey sprite bounds
+                    SDL_SetRenderDrawColor(renderer, 180, 180, 180, 120);
+                    SDL_RenderDrawRect(renderer, &dst);
+                    // Overlay: red collider bounds
+                    glm::vec2 ch = e.size;
+                    SDL_FPoint c2 = world_to_screen(e.pos.x - ch.x * 0.5f, e.pos.y - ch.y * 0.5f);
+                    SDL_Rect coll{(int)std::floor(c2.x), (int)std::floor(c2.y),
+                                  (int)std::ceil(ch.x * scale), (int)std::ceil(ch.y * scale)};
+                    SDL_SetRenderDrawColor(renderer, 220, 60, 60, 160);
+                    SDL_RenderDrawRect(renderer, &coll);
                 } else {
                     add_warning("Missing texture for entity sprite");
                 }
@@ -182,19 +193,12 @@ void render() {
                     SDL_SetRenderDrawColor(renderer, 220, 60, 60, 255);
                 else
                     SDL_SetRenderDrawColor(renderer, 180, 180, 200, 255);
-                SDL_FPoint c = world_to_screen(e.pos.x - e.size.x * 0.5f, e.pos.y - e.size.y * 0.5f);
+                glm::vec2 ds = e.draw_size();
+                SDL_FPoint c = world_to_screen(e.pos.x - ds.x * 0.5f, e.pos.y - ds.y * 0.5f);
                 float scale = TILE_SIZE * gg->play_cam.zoom;
                 SDL_Rect r{(int)std::floor(c.x), (int)std::floor(c.y),
-                           (int)std::ceil(e.size.x * scale), (int)std::ceil(e.size.y * scale)};
+                           (int)std::ceil(ds.x * scale), (int)std::ceil(ds.y * scale)};
                 SDL_RenderFillRect(renderer, &r);
-            } else {
-                // draw outline AABB for debug
-                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 60);
-                SDL_FPoint c = world_to_screen(e.pos.x - e.size.x * 0.5f, e.pos.y - e.size.y * 0.5f);
-                float scale = TILE_SIZE * gg->play_cam.zoom;
-                SDL_Rect r{(int)std::floor(c.x), (int)std::floor(c.y),
-                           (int)std::ceil(e.size.x * scale), (int)std::ceil(e.size.y * scale)};
-                SDL_RenderDrawRect(renderer, &r);
             }
             // Player held gun: rotate sprite around player towards mouse
             if (e.type_ == ids::ET_PLAYER) {
@@ -206,7 +210,7 @@ void render() {
                         for (auto const& g : luam->guns()) if (g.type == gi->def_type) { gd = &g; break; }
                     }
                     int gspr = -1;
-                    if (gd && sprite_id_registry) {
+                    if (gd) {
                         if (!gd->sprite.empty() && gd->sprite.find(':') != std::string::npos)
                             gspr = try_get_sprite_id(gd->sprite);
                     }
@@ -225,7 +229,7 @@ void render() {
                     float scale = TILE_SIZE * gg->play_cam.zoom;
                     SDL_Rect r{(int)std::floor(c0.x), (int)std::floor(c0.y), (int)std::ceil(0.30f * scale), (int)std::ceil(0.20f * scale)};
                     if (gspr >= 0) {
-                        if (SDL_Texture* tex = (textures ? textures->get(gspr) : nullptr))
+                        if (SDL_Texture* tex = get_texture(gspr))
                             SDL_RenderCopyEx(renderer, tex, nullptr, &r, angle_deg, nullptr, SDL_FLIP_NONE);
                         else
                             add_warning("Missing texture for held gun sprite");
@@ -244,9 +248,10 @@ void render() {
             if (!e.active || e.type_ != ids::ET_NPC)
                 continue;
             // Always show bars; if max_hp is zero, skip HP bar but keep slivers if any
-            SDL_FPoint c = world_to_screen(e.pos.x - e.size.x * 0.5f, e.pos.y - e.size.y * 0.5f);
+            glm::vec2 ds = e.draw_size();
+            SDL_FPoint c = world_to_screen(e.pos.x - ds.x * 0.5f, e.pos.y - ds.y * 0.5f);
             float scale = TILE_SIZE * gg->play_cam.zoom;
-            int w = (int)std::ceil(e.size.x * scale);
+            int w = (int)std::ceil(ds.x * scale);
             int h = 6;
             SDL_Rect bg{(int)std::floor(c.x), (int)std::floor(c.y) - (h + 4), w, h};
             SDL_SetRenderDrawColor(renderer, 30, 30, 34, 220);
@@ -309,7 +314,7 @@ void render() {
                 SDL_Rect r{(int)std::floor(c.x), (int)std::floor(c.y),
                            (int)std::ceil(0.25f * scale), (int)std::ceil(0.25f * scale)};
                 int sid = pu.sprite_id;
-                if (sid < 0 && luam && sprite_id_registry) {
+                if (sid < 0 && luam) {
                     for (auto const& pd : luam->powerups())
                         if ((int)pd.type == (int)pu.type) {
                             if (!pd.sprite.empty() && pd.sprite.find(':') != std::string::npos)
@@ -318,7 +323,7 @@ void render() {
                         }
                 }
                 if (sid >= 0) {
-                    if (SDL_Texture* tex = (textures ? textures->get(sid) : nullptr))
+                    if (SDL_Texture* tex = get_texture(sid))
                         SDL_RenderCopy(renderer, tex, nullptr, &r);
                     else
                         add_warning("Missing texture for powerup sprite");
@@ -357,7 +362,7 @@ void render() {
                     for (auto const& d : luam->items())
                         if (d.type == inst->def_type) {
                             if (!d.sprite.empty() && d.sprite.find(':') != std::string::npos)
-                                ispr = sprite_id_registry ? try_get_sprite_id(d.sprite) : -1;
+                                ispr = try_get_sprite_id(d.sprite);
                             else
                                 ispr = -1;
                             break;
@@ -365,7 +370,7 @@ void render() {
                 }
             }
             if (ispr >= 0) {
-                if (SDL_Texture* tex = (textures ? textures->get(ispr) : nullptr))
+                if (SDL_Texture* tex = get_texture(ispr))
                     SDL_RenderCopy(renderer, tex, nullptr, &r);
             } else {
                 add_warning("Missing sprite for item");
@@ -382,15 +387,15 @@ void render() {
         }
         // Ground guns
         for (std::size_t i = 0; i < ss->ground_guns.data().size(); ++i) {
-            auto const& gg = ss->ground_guns.data()[i];
-            if (!gg.active) continue;
-            SDL_FPoint c = world_to_screen(gg.pos.x - gg.size.x * 0.5f, gg.pos.y - gg.size.y * 0.5f);
+            auto const& ggun = ss->ground_guns.data()[i];
+            if (!ggun.active) continue;
+            SDL_FPoint c = world_to_screen(ggun.pos.x - ggun.size.x * 0.5f, ggun.pos.y - ggun.size.y * 0.5f);
             float scale = TILE_SIZE * gg->play_cam.zoom;
             SDL_Rect r{(int)std::floor(c.x), (int)std::floor(c.y),
-                       (int)std::ceil(gg.size.x * scale), (int)std::ceil(gg.size.y * scale)};
-            int sid = gg.sprite_id;
-            if (sid < 0 && luam && sprite_id_registry) {
-                if (const GunInstance* gi = ss->guns.get(gg.gun_vid)) {
+                       (int)std::ceil(ggun.size.x * scale), (int)std::ceil(ggun.size.y * scale)};
+            int sid = ggun.sprite_id;
+            if (sid < 0 && luam) {
+                if (const GunInstance* gi = ss->guns.get(ggun.gun_vid)) {
                     const GunDef* gd = nullptr;
                     for (auto const& g : luam->guns()) if (g.type == gi->def_type) { gd = &g; break; }
                     if (gd && !gd->sprite.empty() && gd->sprite.find(':') != std::string::npos)
@@ -398,7 +403,7 @@ void render() {
                 }
             }
             if (sid >= 0) {
-                if (SDL_Texture* tex = (textures ? textures->get(sid) : nullptr))
+                if (SDL_Texture* tex = get_texture(sid))
                     SDL_RenderCopy(renderer, tex, nullptr, &r);
                 else
                     add_warning("Missing texture for gun sprite");
@@ -408,9 +413,9 @@ void render() {
                 SDL_RenderFillRect(renderer, &r);
             }
             if (pdraw) {
-                glm::vec2 gh = gg.size * 0.5f;
-                float gl = gg.pos.x - gh.x, gr = gg.pos.x + gh.x;
-                float gt = gg.pos.y - gh.y, gb = gg.pos.y + gh.y;
+                glm::vec2 gh = ggun.size * 0.5f;
+                float gl = ggun.pos.x - gh.x, gr = ggun.pos.x + gh.x;
+                float gt = ggun.pos.y - gh.y, gb = ggun.pos.y + gh.y;
                 float area_g = overlap_area(pl, pt, pr, pb, gl, gt, gr, gb);
                 if (area_g > best_area) { best_area = area_g; best_kind = PK::Gun; best_idx = i; }
             }
@@ -433,14 +438,14 @@ void render() {
                     }
                 }
             } else if (best_kind == PK::Gun) {
-                auto const& gg = ss->ground_guns.data()[best_idx];
-                SDL_FPoint c = world_to_screen(gg.pos.x - gg.size.x * 0.5f, gg.pos.y - gg.size.y * 0.5f);
+                auto const& ggun = ss->ground_guns.data()[best_idx];
+                SDL_FPoint c = world_to_screen(ggun.pos.x - ggun.size.x * 0.5f, ggun.pos.y - ggun.size.y * 0.5f);
                 float scale = TILE_SIZE * gg->play_cam.zoom;
                 r = SDL_Rect{(int)std::floor(c.x), (int)std::floor(c.y),
-                             (int)std::ceil(gg.size.x * scale), (int)std::ceil(gg.size.y * scale)};
+                             (int)std::ceil(ggun.size.x * scale), (int)std::ceil(ggun.size.y * scale)};
                 nm = "gun";
                 if (luam) {
-                    if (const GunInstance* gi = ss->guns.get(gg.gun_vid)) {
+                    if (const GunInstance* gi = ss->guns.get(ggun.gun_vid)) {
                         for (auto const& g : luam->guns()) if (g.type == gi->def_type) { nm = g.name; break; }
                     }
                 }
@@ -448,7 +453,7 @@ void render() {
             SDL_SetRenderDrawColor(renderer, 240, 220, 80, 255);
             SDL_RenderDrawRect(renderer, &r);
             const char* keyname = nullptr;
-            if (binds) keyname = SDL_GetScancodeName(binds->pick_up);
+            keyname = SDL_GetScancodeName(ss->input_binds.pick_up);
             if (!keyname || !*keyname) keyname = "F";
             std::string prompt = std::string("Press ") + keyname + " to pick up " + nm;
             SDL_Color col{250, 250, 250, 255};
@@ -484,22 +489,22 @@ void render() {
                     if (luam && inst) {
                         for (auto const& ddf : luam->items()) if (ddf.type == inst->def_type) {
                             iname = ddf.name; idesc = ddf.desc; consume = ddf.consume_on_use;
-                            if (!ddf.sprite.empty() && ddf.sprite.find(':') != std::string::npos && sprite_id_registry)
+                            if (!ddf.sprite.empty() && ddf.sprite.find(':') != std::string::npos)
                                 sid = try_get_sprite_id(ddf.sprite);
                             break; }
                     }
-                    if (sid >= 0 && textures) if (SDL_Texture* texi = textures->get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, texi, nullptr, &dst); ty += 36; }
+                    if (sid >= 0) if (SDL_Texture* texi = get_texture(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, texi, nullptr, &dst); ty += 36; }
                     ui_draw_kv_line(tx, ty, lh, "Item", iname);
                     if (!idesc.empty()) ui_draw_kv_line(tx, ty, lh, "Desc", idesc);
                     ui_draw_kv_line(tx, ty, lh, "Consumable", consume ? std::string("Yes") : std::string("No"));
                 } else if (best_kind == PK::Gun) {
-                    auto const& gg = ss->ground_guns.data()[best_idx];
-                    const GunInstance* gim = ss->guns.get(gg.gun_vid);
+                    auto const& ggun = ss->ground_guns.data()[best_idx];
+                    const GunInstance* gim = ss->guns.get(ggun.gun_vid);
                     const GunDef* gdp = nullptr;
                     if (luam && gim) { for (auto const& gdf : luam->guns()) if (gdf.type == gim->def_type) { gdp = &gdf; break; } }
                     if (gdp) {
-                        int gun_sid = -1; if (!gdp->sprite.empty() && sprite_id_registry) gun_sid = try_get_sprite_id(gdp->sprite);
-                        if (gun_sid >= 0 && textures) if (SDL_Texture* texg = textures->get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, texg, nullptr, &dst); ty += 44; }
+                        int gun_sid = -1; if (!gdp->sprite.empty()) gun_sid = try_get_sprite_id(gdp->sprite);
+                        if (gun_sid >= 0) if (SDL_Texture* texg = get_texture(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, texg, nullptr, &dst); ty += 44; }
                         ui_draw_kv_line(tx, ty, lh, "Gun", gdp->name);
                         ui_draw_kv_line(tx, ty, lh, "Damage", std::to_string((int)std::lround(gdp->damage)));
                         ui_draw_kv_line(tx, ty, lh, "RPM", std::to_string((int)std::lround(gdp->rpm)));
@@ -514,8 +519,8 @@ void render() {
                         ui_draw_kv_line(tx, ty, lh, "AR Size", fmt2(gdp->ar_size) + " ±" + fmt2(gdp->ar_size_variance));
                         if (gim && gim->ammo_type != 0) {
                             if (auto const* ad = luam->find_ammo(gim->ammo_type)) {
-                                int asid = (!ad->sprite.empty() && sprite_id_registry) ? try_get_sprite_id(ad->sprite) : -1;
-                                if (asid >= 0 && textures) if (SDL_Texture* tex = textures->get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
+                                int asid = (!ad->sprite.empty()) ? try_get_sprite_id(ad->sprite) : -1;
+                                if (asid >= 0) if (SDL_Texture* tex = get_texture(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
                                 int apct = (int)std::lround(ad->armor_pen * 100.0f);
                                 ui_draw_kv_line(tx, ty, lh, "Ammo", ad->name);
                                 if (!ad->desc.empty()) ui_draw_kv_line(tx, ty, lh, "Desc", ad->desc);
@@ -546,12 +551,11 @@ void render() {
                        (int)std::ceil(proj.size.x * scale), (int)std::ceil(proj.size.y * scale)};
             bool drew = false;
             if (proj.sprite_id >= 0) {
-                if (textures) { if (SDL_Texture* tex = textures->get(proj.sprite_id)) {
+                if (SDL_Texture* tex = get_texture(proj.sprite_id)) {
                     SDL_RenderCopy(renderer, tex, nullptr, &r);
                     drew = true;
                 } else {
                     add_warning("Missing texture for projectile sprite");
-                }
                 }
             }
             if (!drew) {
@@ -720,7 +724,8 @@ void render() {
         struct HoverSlot { SDL_Rect r; std::size_t index; };
         std::vector<HoverSlot> inv_hover_rects;
         for (int i = 0; i < 10; ++i) {
-            bool selected = (ss->inventory.selected_index == (std::size_t)i);
+            const Inventory* pinv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr);
+            bool selected = (pinv ? (pinv->selected_index == (std::size_t)i) : (ss->inventory.selected_index == (std::size_t)i));
             SDL_Rect slot{sx, sy + i * slot_h, slot_w, slot_h - 6};
             SDL_SetRenderDrawColor(renderer, selected ? 30 : 18, selected ? 30 : 18, selected ? 40 : 22, 200);
             SDL_RenderFillRect(renderer, &slot);
@@ -736,15 +741,15 @@ void render() {
                 SDL_Rect d{slot.x - 20, slot.y + 2, tw, th}; SDL_RenderCopy(renderer, ht, nullptr, &d);
                 SDL_DestroyTexture(ht); SDL_FreeSurface(hs);
             }
-            const InvEntry* ent = ss->inventory.get((std::size_t)i);
+            const InvEntry* ent = pinv ? pinv->get((std::size_t)i) : ss->inventory.get((std::size_t)i);
             if (ent) {
                 inv_hover_rects.push_back(HoverSlot{slot, (std::size_t)i});
                 int icon_w = slot_h - 8, icon_h = slot_h - 8;
                 int icon_x = slot.x + 6, icon_y = slot.y + 3;
                 int label_x = slot.x + 8; int label_offset = 0;
                 auto draw_icon = [&](int sprite_id) {
-                    if (sprite_id >= 0 && textures) {
-                        if (SDL_Texture* tex = textures->get(sprite_id)) {
+                    if (sprite_id >= 0) {
+                        if (SDL_Texture* tex = get_texture(sprite_id)) {
                             SDL_Rect dst{icon_x, icon_y, icon_w, icon_h};
                             SDL_RenderCopy(renderer, tex, nullptr, &dst);
                             label_offset = icon_w + 10;
@@ -757,7 +762,7 @@ void render() {
                         std::string nm = "item"; uint32_t count = inst->count; int sid = -1;
                         if (luam) {
                             for (auto const& d : luam->items()) if (d.type == inst->def_type) {
-                                nm = d.name; if (!d.sprite.empty() && d.sprite.find(':') != std::string::npos && sprite_id_registry) sid = try_get_sprite_id(d.sprite); break; }
+                                nm = d.name; if (!d.sprite.empty() && d.sprite.find(':') != std::string::npos) sid = try_get_sprite_id(d.sprite); break; }
                         }
                         draw_icon(sid); label = nm; if (count > 1) label += std::string(" x") + std::to_string(count);
                     }
@@ -765,7 +770,7 @@ void render() {
                     if (const GunInstance* gi = ss->guns.get(ent->vid)) {
                         std::string nm = "gun"; int sid = -1;
                         if (luam) {
-                            for (auto const& g : luam->guns()) if (g.type == gi->def_type) { nm = g.name; if (!g.sprite.empty() && g.sprite.find(':') != std::string::npos && sprite_id_registry) sid = try_get_sprite_id(g.sprite); break; }
+                            for (auto const& g : luam->guns()) if (g.type == gi->def_type) { nm = g.name; if (!g.sprite.empty() && g.sprite.find(':') != std::string::npos) sid = try_get_sprite_id(g.sprite); break; }
                         }
                         draw_icon(sid); label = nm;
                     }
@@ -803,16 +808,17 @@ void render() {
         const float HOVER_DELAY = 0.12f;
         // Drag-and-drop
         static bool prev_left = false; bool now_left = ss->mouse_inputs.left;
-        if (now_left && !prev_left) { if (hover_index.has_value()) if (ss->inventory.get(*hover_index) != nullptr) { ss->inv_dragging = true; ss->inv_drag_src = (int)*hover_index; } }
+        if (now_left && !prev_left) { if (hover_index.has_value()) { const Inventory* pinv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr); if ((pinv ? pinv->get(*hover_index) : ss->inventory.get(*hover_index)) != nullptr) { ss->inv_dragging = true; ss->inv_drag_src = (int)*hover_index; } } }
         if (!now_left && prev_left) {
             if (ss->inv_dragging) {
                 if (hover_index.has_value()) {
                     std::size_t dst = *hover_index; std::size_t src = (std::size_t)std::max(0, ss->inv_drag_src);
                     if (dst != src) {
-                        InvEntry* src_e = ss->inventory.get_mut(src); InvEntry* dst_e = ss->inventory.get_mut(dst);
+                        Inventory* pinv2 = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr);
+                        InvEntry* src_e = pinv2 ? pinv2->get_mut(src) : ss->inventory.get_mut(src); InvEntry* dst_e = pinv2 ? pinv2->get_mut(dst) : ss->inventory.get_mut(dst);
                         if (src_e && dst_e) { std::size_t tmp = src_e->index; src_e->index = dst_e->index; dst_e->index = tmp; }
                         else if (src_e && !dst_e) { src_e->index = dst; }
-                        std::sort(ss->inventory.entries.begin(), ss->inventory.entries.end(), [](auto const& lhs, auto const& rhs) { return lhs.index < rhs.index; });
+                        if (pinv2) std::sort(pinv2->entries.begin(), pinv2->entries.end(), [](auto const& lhs, auto const& rhs) { return lhs.index < rhs.index; }); else std::sort(ss->inventory.entries.begin(), ss->inventory.entries.end(), [](auto const& lhs, auto const& rhs) { return lhs.index < rhs.index; });
                     }
                 }
                 ss->inv_dragging = false; ss->inv_drag_src = -1;
@@ -820,7 +826,8 @@ void render() {
         }
         prev_left = now_left;
         if (hover_index.has_value() && ss->inv_hover_time >= HOVER_DELAY) {
-            const InvEntry* sel = ss->inventory.get(*hover_index);
+            const Inventory* pinv3 = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr);
+            const InvEntry* sel = pinv3 ? pinv3->get(*hover_index) : ss->inventory.get(*hover_index);
             if (sel) {
                 int panel_w = (int)std::lround(width * 0.32);
                 int px = (width - panel_w) / 2; int py = (int)std::lround(height * 0.22);
@@ -834,8 +841,8 @@ void render() {
                 if (sel->kind == INV_ITEM) {
                     if (const ItemInstance* inst = ss->items.get(sel->vid)) {
                         std::string nm = "item"; std::string desc; uint32_t maxc = 1; bool consume = false; int sid = -1;
-                        if (luam) { for (auto const& d : luam->items()) if (d.type == inst->def_type) { nm=d.name; desc=d.desc; maxc=(uint32_t)d.max_count; consume=d.consume_on_use; if(!d.sprite.empty() && d.sprite.find(':')!=std::string::npos && sprite_id_registry) sid=try_get_sprite_id(d.sprite); break; } }
-                        if (sid >= 0 && textures) if (SDL_Texture* tex = textures->get(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 36; }
+                        if (luam) { for (auto const& d : luam->items()) if (d.type == inst->def_type) { nm=d.name; desc=d.desc; maxc=(uint32_t)d.max_count; consume=d.consume_on_use; if(!d.sprite.empty() && d.sprite.find(':')!=std::string::npos) sid=try_get_sprite_id(d.sprite); break; } }
+                        if (sid >= 0) if (SDL_Texture* tex = get_texture(sid)) { SDL_Rect dst{tx, ty, 48, 32}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 36; }
                         draw_txt(std::string("Item: ") + nm, SDL_Color{255,255,255,255});
                         draw_txt(std::string("Count: ") + std::to_string(inst->count) + "/" + std::to_string(maxc), SDL_Color{220,220,220,255});
                         if (!desc.empty()) draw_txt(std::string("Desc: ") + desc, SDL_Color{200,200,200,255});
@@ -846,8 +853,8 @@ void render() {
                         std::string nm = "gun"; const GunDef* gdp = nullptr;
                         if (luam) { for (auto const& g : luam->guns()) if (g.type == gi->def_type) { gdp = &g; break; } }
                         if (gdp) {
-                            int gun_sid = -1; if (!gdp->sprite.empty() && sprite_id_registry) gun_sid = try_get_sprite_id(gdp->sprite);
-                            if (gun_sid >= 0 && textures) if (SDL_Texture* tex = textures->get(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; }
+                            int gun_sid = -1; if (!gdp->sprite.empty()) gun_sid = try_get_sprite_id(gdp->sprite);
+                            if (gun_sid >= 0) if (SDL_Texture* tex = get_texture(gun_sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; }
                             draw_txt(std::string("Gun: ") + gdp->name, SDL_Color{255,255,255,255});
                             draw_txt(std::string("Damage: ") + std::to_string((int)std::lround(gdp->damage)), SDL_Color{220,220,220,255});
                             draw_txt(std::string("RPM: ") + std::to_string((int)std::lround(gdp->rpm)), SDL_Color{220,220,220,255});
@@ -860,8 +867,8 @@ void render() {
                             draw_txt(std::string("Jam: ") + std::to_string((int)std::lround(gdp->jam_chance * 100.0f)) + " %", SDL_Color{220,220,220,255});
                             if (gi->ammo_type != 0) {
                                 if (auto const* ad = luam->find_ammo(gi->ammo_type)) {
-                                    int asid = (!ad->sprite.empty() && sprite_id_registry) ? try_get_sprite_id(ad->sprite) : -1;
-                                    if (asid >= 0 && textures) if (SDL_Texture* tex = textures->get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
+                                    int asid = (!ad->sprite.empty()) ? try_get_sprite_id(ad->sprite) : -1;
+                                    if (asid >= 0) if (SDL_Texture* tex = get_texture(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
                                     draw_txt(std::string("Ammo: ") + ad->name, SDL_Color{255,255,255,255});
                                     if (!ad->desc.empty()) draw_txt(std::string("Desc: ") + ad->desc, SDL_Color{200,200,200,255});
                                     int apct = (int)std::lround(ad->armor_pen * 100.0f);
@@ -894,7 +901,7 @@ void render() {
                 int tx = px + 12; int ty = py + 12; int lh = 18;
                 auto draw_txt = [&](const std::string& s, SDL_Color col){ SDL_Surface* srf = TTF_RenderUTF8_Blended(gg->ui_font, s.c_str(), col); if (srf){ SDL_Texture* t=SDL_CreateTextureFromSurface(renderer,srf); int tw=0,th=0; SDL_QueryTexture(t,nullptr,nullptr,&tw,&th); SDL_Rect d{tx,ty,tw,th}; SDL_RenderCopy(renderer,t,nullptr,&d); SDL_DestroyTexture(t); SDL_FreeSurface(srf);} ty += lh; };
                 // Icon
-                if (!gd->sprite.empty() && sprite_id_registry) { int sid = try_get_sprite_id(gd->sprite); if (sid >= 0 && textures) if (SDL_Texture* tex = textures->get(sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; } }
+                if (!gd->sprite.empty()) { int sid = try_get_sprite_id(gd->sprite); if (sid >= 0) if (SDL_Texture* tex = get_texture(sid)) { SDL_Rect dst{tx, ty, 64, 40}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 44; } }
                 // Key stats
                 ui_draw_kv_line(tx, ty, lh, "Gun", gd->name);
                 ui_draw_kv_line(tx, ty, lh, "Damage", std::to_string((int)std::lround(gd->damage)));
@@ -907,7 +914,7 @@ void render() {
                 ui_draw_kv_line(tx, ty, lh, "Jam", std::to_string((int)std::lround(gd->jam_chance * 100.0f)) + " %");
                 ui_draw_kv_line(tx, ty, lh, "AR Center", fmt2(gd->ar_pos) + " ±" + fmt2(gd->ar_pos_variance));
                 ui_draw_kv_line(tx, ty, lh, "AR Size", fmt2(gd->ar_size) + " ±" + fmt2(gd->ar_size_variance));
-                if (gd->rpm > 0.0f || gd->shot_interval > 0.0f) { float dt = gd->shot_interval > 0.0f ? gd->shot_interval : (60.0f / std::max(1.0f, gd->rpm)); int ms = (int)std::lround(dt * 1000.0f); draw_txt(std::string("Shot Time: ") + std::to_string(ms) + " ms", SDL_Color{220,220,220,255}); }
+                if (gd->rpm > 0.0f || gd->shot_interval > 0.0f) { float shot_dt = gd->shot_interval > 0.0f ? gd->shot_interval : (60.0f / std::max(1.0f, gd->rpm)); int ms = (int)std::lround(shot_dt * 1000.0f); draw_txt(std::string("Shot Time: ") + std::to_string(ms) + " ms", SDL_Color{220,220,220,255}); }
                 if (gd->fire_mode == std::string("burst") && (gd->burst_rpm > 0.0f || gd->burst_interval > 0.0f)) { draw_txt(std::string("Burst RPM: ") + std::to_string((int)std::lround(gd->burst_rpm)), SDL_Color{220,220,220,255}); float bdt = gd->burst_interval > 0.0f ? gd->burst_interval : (gd->burst_rpm > 0.0f ? 60.0f / gd->burst_rpm : 0.0f); if (bdt > 0.0f) { int bms = (int)std::lround(bdt * 1000.0f); draw_txt(std::string("Burst Time: ") + std::to_string(bms) + " ms", SDL_Color{220,220,220,255}); } }
                 // Fire mode label
                 { std::string fm_label = "Auto"; if (gd->fire_mode == "single") fm_label = "Semi"; else if (gd->fire_mode == "burst") fm_label = "Burst"; draw_txt(std::string("Mode: ") + fm_label, SDL_Color{220,220,220,255}); }
@@ -917,8 +924,8 @@ void render() {
                     ui_draw_kv_line(tx, ty, lh, "Reserve", std::to_string(gi_inst->ammo_reserve));
                     if (gi_inst->ammo_type != 0) {
                         if (auto const* ad = luam->find_ammo(gi_inst->ammo_type)) {
-                            int asid = (!ad->sprite.empty() && sprite_id_registry) ? try_get_sprite_id(ad->sprite) : -1;
-                            if (asid >= 0 && textures) if (SDL_Texture* tex = textures->get(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
+                            int asid = (!ad->sprite.empty()) ? try_get_sprite_id(ad->sprite) : -1;
+                            if (asid >= 0) if (SDL_Texture* tex = get_texture(asid)) { SDL_Rect dst{tx, ty, 36, 20}; SDL_RenderCopy(renderer, tex, nullptr, &dst); ty += 22; }
                             int apct = (int)std::lround(ad->armor_pen * 100.0f);
                             ui_draw_kv_line(tx, ty, lh, "Ammo", ad->name);
                             if (!ad->desc.empty()) ui_draw_kv_line(tx, ty, lh, "Desc", ad->desc);

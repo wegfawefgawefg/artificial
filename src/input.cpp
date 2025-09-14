@@ -5,6 +5,9 @@
 
 #include <algorithm>
 
+// Forward declaration used within this translation unit
+void collect_menu_inputs();
+
 static bool is_down(SDL_Scancode sc) {
     const Uint8* ks = SDL_GetKeyboardState(nullptr);
     return ks[sc] != 0;
@@ -29,7 +32,9 @@ void process_event(SDL_Event& ev) {
 }
 
 void collect_inputs() {
+    // Transfer wheel delta to one-frame mouse scroll and reset the accumulator
     ss->mouse_inputs.scroll = ss->input_state.wheel_delta;
+    ss->input_state.wheel_delta = 0.0f;
     collect_menu_inputs();
 }
 
@@ -105,12 +110,12 @@ void process_inputs_playing() {
     pi.num_row_9 = is_down(SDL_SCANCODE_9);
     pi.num_row_0 = is_down(SDL_SCANCODE_0);
 
-    // Zoom with mouse wheel
-    if (ss->input_state.wheel_delta != 0.0f) {
+    // Zoom with mouse wheel (use per-frame scroll delta)
+    if (ss->mouse_inputs.scroll != 0.0f) {
         const float ZOOM_INCREMENT = 0.25f;
         const float MIN_ZOOM = 0.5f;
         const float MAX_ZOOM = 32.0f;
-        float dir = (ss->input_state.wheel_delta > 0.0f) ? 1.0f : -1.0f;
+        float dir = (ss->mouse_inputs.scroll > 0.0f) ? 1.0f : -1.0f;
         if (gg) {
             gg->play_cam.zoom =
                 std::clamp(gg->play_cam.zoom + dir * ZOOM_INCREMENT, MIN_ZOOM, MAX_ZOOM);

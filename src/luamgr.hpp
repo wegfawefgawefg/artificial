@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <sol/sol.hpp>
+#include "entity.hpp"
 
 struct State;
 struct Entity;
@@ -154,6 +155,69 @@ struct CrateDef {
     sol::protected_function on_open;
 };
 
+// Entity type definitions (Lua)
+struct EntityTypeDef {
+    std::string name;
+    int type = 0;
+    std::string sprite;   // namespaced sprite key
+    // Sizes in world units
+    float sprite_w{0.25f};
+    float sprite_h{0.25f};
+    float collider_w{0.25f};
+    float collider_h{0.25f};
+    int physics_steps{1};
+    // Core stats
+    uint32_t max_hp{1000};
+    float health_regen{0.0f};
+    float shield_max{0.0f};
+    float shield_regen{0.0f};
+    float armor{0.0f};
+    int plates{0};
+    // Movement/accuracy
+    float move_speed{350.0f};
+    float dodge{3.0f};
+    float accuracy{100.0f};
+    float move_spread_inc_rate_deg_per_sec_at_base{8.0f};
+    float move_spread_decay_deg_per_sec{10.0f};
+    float move_spread_max_deg{20.0f};
+    // Economy/modifiers
+    float scavenging{100.0f};
+    float currency{100.0f};
+    float ammo_gain{100.0f};
+    float luck{100.0f};
+    // Combat
+    float crit_chance{3.0f};
+    float crit_damage{200.0f};
+    float headshot_damage{200.0f};
+    float damage_absorb{100.0f};
+    float damage_output{100.0f};
+    float healing{100.0f};
+    float terror_level{100.0f};
+    // Optional ticking
+    float tick_rate_hz{0.0f};
+    std::string tick_phase; // "before" or "after" (default after)
+    // Hooks
+    sol::protected_function on_step;
+    sol::protected_function on_damage;
+    sol::protected_function on_spawn;
+    sol::protected_function on_death;
+    // Gun/reload hooks
+    sol::protected_function on_reload_start;
+    sol::protected_function on_reload_finish;
+    sol::protected_function on_gun_jam;
+    sol::protected_function on_out_of_ammo;
+    // HP/shield thresholds
+    sol::protected_function on_hp_under_50;
+    sol::protected_function on_hp_under_25;
+    sol::protected_function on_hp_full;
+    sol::protected_function on_shield_under_50;
+    sol::protected_function on_shield_under_25;
+    sol::protected_function on_shield_full;
+    sol::protected_function on_plates_lost;
+    // Collision
+    sol::protected_function on_collide_tile;
+};
+
 struct LuaManager {
   public:
     LuaManager();
@@ -218,6 +282,22 @@ struct LuaManager {
         return nullptr;
     }
     void call_generate_room();
+    void call_entity_on_step(int entity_type, struct Entity& e);
+    void call_entity_on_damage(int entity_type, struct Entity& e, int attacker_ap);
+    void call_entity_on_spawn(int entity_type, struct Entity& e);
+    void call_entity_on_death(int entity_type, struct Entity& e);
+    void call_entity_on_reload_start(int entity_type, struct Entity& e);
+    void call_entity_on_reload_finish(int entity_type, struct Entity& e);
+    void call_entity_on_gun_jam(int entity_type, struct Entity& e);
+    void call_entity_on_out_of_ammo(int entity_type, struct Entity& e);
+    void call_entity_on_hp_under_50(int entity_type, struct Entity& e);
+    void call_entity_on_hp_under_25(int entity_type, struct Entity& e);
+    void call_entity_on_hp_full(int entity_type, struct Entity& e);
+    void call_entity_on_shield_under_50(int entity_type, struct Entity& e);
+    void call_entity_on_shield_under_25(int entity_type, struct Entity& e);
+    void call_entity_on_shield_full(int entity_type, struct Entity& e);
+    void call_entity_on_plates_lost(int entity_type, struct Entity& e);
+    void call_entity_on_collide_tile(int entity_type, struct Entity& e);
 
     const std::vector<PowerupDef>& powerups() const {
         return powerups_;
@@ -244,6 +324,14 @@ struct LuaManager {
     const std::vector<CrateDef>& crates() const {
         return crates_;
     }
+    const std::vector<EntityTypeDef>& entity_types() const { return entity_types_; }
+    const EntityTypeDef* find_entity_type(int type) const {
+        for (auto const& e : entity_types_) {
+            if (e.type == type)
+                return &e;
+        }
+        return nullptr;
+    }
 
     // Registration (used by Lua bindings)
     void add_powerup(const PowerupDef& d) {
@@ -262,6 +350,7 @@ struct LuaManager {
     void add_crate(const CrateDef& d) {
         crates_.push_back(d);
     }
+    void add_entity_type(const EntityTypeDef& d) { entity_types_.push_back(d); }
 
   private:
     void clear();
@@ -274,6 +363,7 @@ struct LuaManager {
     std::vector<ProjectileDef> projectiles_;
     std::vector<AmmoDef> ammo_;
     std::vector<CrateDef> crates_;
+    std::vector<EntityTypeDef> entity_types_;
     DropTables drops_;
     sol::protected_function on_dash;
     sol::protected_function on_active_reload;

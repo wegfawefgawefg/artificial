@@ -55,3 +55,5 @@ bool cheap_scan_mods_to_update_sprite_name_registry();
 // Returns true if store was rebuilt.
 bool scan_mods_for_sprite_defs();
 
+// Destroy global ModManager and release memory.
+void cleanup_mods_manager();

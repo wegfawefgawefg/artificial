@@ -126,7 +126,10 @@ bool init_graphics(bool headless) {
 }
 
 void cleanup_graphics() {
+    if (!gg) return;
     if (gg->ui_font) { TTF_CloseFont(gg->ui_font); gg->ui_font = nullptr; }
+    // Destroy textures before renderer
+    clear_textures();
     if (gg->renderer) {
         SDL_DestroyRenderer(gg->renderer);
         gg->renderer = nullptr;
@@ -136,6 +139,8 @@ void cleanup_graphics() {
         gg->window = nullptr;
     }
     if (TTF_WasInit()) TTF_Quit();
+    delete gg;
+    gg = nullptr;
 }
 
 
@@ -269,4 +274,3 @@ SDL_Texture* get_texture(int sprite_id) {
     auto it = gg->textures_by_id.find(sprite_id);
     return (it == gg->textures_by_id.end()) ? nullptr : it->second;
 }
-

@@ -58,7 +58,7 @@ struct State {
     std::optional<VID> player_vid{};
     Particles particles{};
     Stage stage{64, 36};
-    Inventory inventory = Inventory::make();
+    Inventory inventory = Inventory::make(); // legacy: use per-entity via inv_for()
     ItemsPool items{};
     PickupsPool pickups{};
     GroundItemsPool ground_items{};
@@ -216,6 +216,19 @@ struct State {
         }
         return &m;
     }
+
+    // Per-entity inventories
+    std::vector<Inventory> inventories; // index by VID.id; validate by Active entity
+
+    Inventory* inv_for(VID v) {
+        if (v.id >= inventories.size()) inventories.resize(v.id + 1);
+        return &inventories[v.id];
+    }
+    const Inventory* inv_for(VID v) const {
+        if (v.id >= inventories.size()) return nullptr;
+        return &inventories[v.id];
+    }
 };
 
 bool init_state();
+void cleanup_state();

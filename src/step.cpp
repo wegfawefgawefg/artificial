@@ -236,7 +236,7 @@ void step() {
         if (ss->player_vid) {
             const Entity* p = ss->entities.get(*ss->player_vid);
             if (p) {
-                int ww = gg->window_dims.x, wh = gg->window_dims.y;
+                int ww = static_cast<int>(gg->window_dims.x), wh = static_cast<int>(gg->window_dims.y);
                 if (gg->renderer) SDL_GetRendererOutputSize(gg->renderer, &ww, &wh);
                 float zx = gg->play_cam.zoom;
                 float sx = static_cast<float>(ss->mouse_inputs.pos.x);
@@ -311,7 +311,7 @@ void step() {
                                         luam->call_on_active_reload(*plm);
                                         luam->call_gun_on_active_reload(gim->def_type,
                                                                                 *plm);
-                                        for (const auto& entry : ss->inventory.entries) {
+                                        if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) {
                                             if (entry.kind == INV_ITEM) {
                                                 if (const ItemInstance* inst =
                                                         ss->items.get(entry.vid)) {
@@ -338,7 +338,7 @@ void step() {
                                         luam->call_on_failed_active_reload(*plm);
                                         luam->call_gun_on_failed_active_reload(
                                             gim->def_type, *plm);
-                                        for (const auto& entry : ss->inventory.entries) {
+                                        if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) {
                                             if (entry.kind == INV_ITEM) {
                                                 if (const ItemInstance* inst =
                                                         ss->items.get(entry.vid)) {
@@ -354,7 +354,7 @@ void step() {
                                         luam->call_on_tried_after_failed_ar(*plm);
                                         luam->call_gun_on_tried_after_failed_ar(
                                             gim->def_type, *plm);
-                                        for (const auto& entry : ss->inventory.entries) {
+                                        if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) {
                                             if (entry.kind == INV_ITEM) {
                                                 if (const ItemInstance* inst =
                                                         ss->items.get(entry.vid)) {
@@ -375,6 +375,7 @@ void step() {
                                 gim->current_mag = 0;
                                 // Start active reload sequence
                                 gim->reloading = true;
+                                if (plm->def_type && luam) luam->call_entity_on_reload_start(plm->def_type, *plm);
                                 // Metrics: reloads
                                 if (ss->player_vid) {
                                     if (auto* pm = ss->metrics_for(*ss->player_vid))
@@ -411,6 +412,7 @@ void step() {
                             } else {
                                 ss->alerts.push_back(
                                     {std::string("NO AMMO"), 0.0f, 1.5f, false});
+                                if (plm->def_type && luam) luam->call_entity_on_out_of_ammo(plm->def_type, *plm);
                             }
                         }
                     }
@@ -483,7 +485,7 @@ void step() {
                                             : glm::vec2{(float)ss->stage.get_width() / 2.0f,
                                                         (float)ss->stage.get_height() / 2.0f};
             // convert mouse to world
-            int ww = gg->window_dims.x, wh = gg->window_dims.y;
+            int ww = static_cast<int>(gg->window_dims.x), wh = static_cast<int>(gg->window_dims.y);
             if (gg->renderer) SDL_GetRendererOutputSize(gg->renderer, &ww, &wh);
             float inv_scale = 1.0f / (TILE_SIZE * gg->play_cam.zoom);
             glm::vec2 m = {gg->play_cam.pos.x + (static_cast<float>(ss->mouse_inputs.pos.x) -
@@ -580,8 +582,10 @@ void step() {
                                 gim->jammed = true;
                                 gim->unjam_progress = 0.0f;
                                 fired = false;
-                        if (luam)
+                        if (luam) {
                             luam->call_gun_on_jam(gim->def_type, *plm);
+                            if (plm->def_type) luam->call_entity_on_gun_jam(plm->def_type, *plm);
+                        }
                         if (aa) play_sound(gd->sound_jam.empty() ? "base:ui_cant"
                                                                     : gd->sound_jam);
                         ss->alerts.push_back(
@@ -716,7 +720,7 @@ void step() {
                 if (luam && ss->player_vid) {
                     auto* plm = ss->entities.get_mut(*ss->player_vid);
                     if (plm) {
-                        for (const auto& entry : ss->inventory.entries) {
+                        if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) {
                             if (entry.kind == INV_ITEM) {
                                 if (const ItemInstance* inst = ss->items.get(entry.vid)) {
                                     luam->call_item_on_shoot(inst->def_type, *plm);
@@ -831,13 +835,13 @@ void step() {
         sim_step_projectiles();
         
         // After-physics ticking (opt-in)
-        Entity* plat = ss->entities.get_mut(*ss->player_vid);
+        Entity* plat = ss->player_vid ? ss->entities.get_mut(*ss->player_vid) : nullptr;
         if (plat) {
             const float dt = TIMESTEP;
             const int MAX_TICKS = 4000;
             int tick_calls = 0;
             // Guns with on_step
-            for (const auto& entry : ss->inventory.entries) {
+            if (auto* inv = ss->inv_for(*ss->player_vid)) for (const auto& entry : inv->entries) {
                 if (entry.kind != INV_GUN)
                     continue;
                 GunInstance* gi = ss->guns.get(entry.vid);
@@ -849,7 +853,7 @@ void step() {
                         gd = &g;
                         break;
                     }
-                if (!gd || gd->on_step_ref < 0)
+                if (!gd || !gd->on_step.valid())
                     continue;
                 if (gd->tick_rate_hz <= 0.0f || gd->tick_phase == "before")
                     continue;
@@ -862,7 +866,7 @@ void step() {
                 }
             }
             // Items with on_tick
-            for (const auto& entry : ss->inventory.entries) {
+            if (auto* inv = ss->inv_for(*ss->player_vid)) for (const auto& entry : inv->entries) {
                 if (entry.kind != INV_ITEM)
                     continue;
                 ItemInstance* inst = ss->items.get(entry.vid);
@@ -874,7 +878,7 @@ void step() {
                         idf = &d;
                         break;
                     }
-                if (!idf || idf->on_tick_ref < 0)
+                if (!idf || !idf->on_tick.valid())
                     continue;
                 if (idf->tick_rate_hz <= 0.0f || idf->tick_phase == "before")
                     continue;
@@ -883,6 +887,24 @@ void step() {
                 while (inst->tick_acc >= period && tick_calls < MAX_TICKS) {
                     luam->call_item_on_tick(inst->def_type, *plat, period);
                     inst->tick_acc -= period;
+                    ++tick_calls;
+                }
+            }
+        }
+        // Entity type on_step ticks (after phase)
+        if (luam) {
+            const int MAX_TICKS = 4000;
+            int tick_calls = 0;
+            for (auto& e : ss->entities.data()) {
+                if (!e.active || e.def_type == 0) continue;
+                const auto* ed = luam->find_entity_type(e.def_type);
+                if (!ed) continue;
+                if (ed->tick_rate_hz <= 0.0f || ed->tick_phase != std::string("after") || !ed->on_step.valid()) continue;
+                e.tick_acc_entity += TIMESTEP;
+                float period = 1.0f / std::max(1.0f, ed->tick_rate_hz);
+                while (e.tick_acc_entity >= period && tick_calls < MAX_TICKS) {
+                    luam->call_entity_on_step(e.def_type, e);
+                    e.tick_acc_entity -= period;
                     ++tick_calls;
                 }
             }
@@ -900,10 +922,10 @@ void step() {
                     ss->items.free(gi.item_vid);
                     gi.active = false;
                 }
-            for (auto& gg : ss->ground_guns.data())
-                if (gg.active) {
-                    ss->guns.free(gg.gun_vid);
-                    gg.active = false;
+            for (auto& ggun : ss->ground_guns.data())
+                if (ggun.active) {
+                    ss->guns.free(ggun.gun_vid);
+                    ggun.active = false;
                 }
             std::printf("[room] Proceeding to next area info screen.\n");
             ss->mode = ids::MODE_NEXT_STAGE;

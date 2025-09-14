@@ -2,6 +2,7 @@
 #include "graphics.hpp"
 #include "runtime_settings.hpp"
 #include "luamgr.hpp"
+#include "sim.hpp"
 #include "settings.hpp"
 #include "room.hpp"
 #include "sprites.hpp"
@@ -25,7 +26,9 @@ void sim_pre_physics_ticks() {
             const int MAX_TICKS = 4000;
             int tick_calls = 0;
             // Guns with on_step
-            for (const auto& entry : ss->inventory.entries) {
+            const Inventory* pinv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr);
+            if (pinv)
+            for (const auto& entry : pinv->entries) {
                 if (entry.kind != INV_GUN)
                     continue;
                 GunInstance* gi = ss->guns.get(entry.vid);
@@ -37,7 +40,7 @@ void sim_pre_physics_ticks() {
                         gd = &g;
                         break;
                     }
-                if (!gd || gd->on_step_ref < 0)
+                if (!gd || !gd->on_step.valid())
                     continue;
                 if (gd->tick_rate_hz <= 0.0f || gd->tick_phase == "after")
                     continue;
@@ -50,7 +53,8 @@ void sim_pre_physics_ticks() {
                 }
             }
             // Items with on_tick
-            for (const auto& entry : ss->inventory.entries) {
+            if (pinv)
+            for (const auto& entry : pinv->entries) {
                 if (entry.kind != INV_ITEM)
                     continue;
                 ItemInstance* inst = ss->items.get(entry.vid);
@@ -62,7 +66,7 @@ void sim_pre_physics_ticks() {
                         idf = &d;
                         break;
                     }
-                if (!idf || idf->on_tick_ref < 0)
+                if (!idf || !idf->on_tick.valid())
                     continue;
                 if (idf->tick_rate_hz <= 0.0f || idf->tick_phase == "after")
                     continue;
@@ -73,6 +77,25 @@ void sim_pre_physics_ticks() {
                     inst->tick_acc -= period;
                     ++tick_calls;
                 }
+            }
+        }
+    }
+    // Entity type on_step ticks (before phase)
+    if (luam) {
+        const float dt = TIMESTEP;
+        const int MAX_TICKS = 4000;
+        int tick_calls = 0;
+        for (auto& e : ss->entities.data()) {
+            if (!e.active || e.def_type == 0) continue;
+            const auto* ed = luam->find_entity_type(e.def_type);
+            if (!ed) continue;
+            if (ed->tick_rate_hz <= 0.0f || ed->tick_phase == "after" || !ed->on_step.valid()) continue;
+            e.tick_acc_entity += dt;
+            float period = 1.0f / std::max(1.0f, ed->tick_rate_hz);
+            while (e.tick_acc_entity >= period && tick_calls < MAX_TICKS) {
+                luam->call_entity_on_step(e.def_type, e);
+                e.tick_acc_entity -= period;
+                ++tick_calls;
             }
         }
     }
@@ -180,7 +203,7 @@ void sim_move_and_collide() {
                         if (ss->stage.in_bounds(x, y) && ss->stage.at(x, y).blocks_entities()) {
                             blocked = true;
                         }
-                if (!blocked) e.pos.x = next_x; else e.vel.x = 0.0f;
+                if (!blocked) e.pos.x = next_x; else { e.vel.x = 0.0f; if (luam && e.def_type) luam->call_entity_on_collide_tile(e.def_type, e); }
             }
             // Y axis
             float next_y = e.pos.y + step_dpos.y;
@@ -195,7 +218,7 @@ void sim_move_and_collide() {
                         if (ss->stage.in_bounds(x, y) && ss->stage.at(x, y).blocks_entities()) {
                             blocked = true;
                         }
-                if (!blocked) e.pos.y = next_y; else e.vel.y = 0.0f;
+                if (!blocked) e.pos.y = next_y; else { e.vel.y = 0.0f; if (luam && e.def_type) luam->call_entity_on_collide_tile(e.def_type, e); }
             }
         }
     }
@@ -207,7 +230,15 @@ void sim_shield_and_reload() {
         if (!e.active)
             continue;
         if (e.stats.shield_max > 0.0f && e.time_since_damage >= 3.0f) {
+            float prev_ratio = (e.stats.shield_max > 0.0f) ? (e.shield / e.stats.shield_max) : 0.0f;
             e.shield = std::min(e.stats.shield_max, e.shield + e.stats.shield_regen * TIMESTEP);
+            float ratio = (e.stats.shield_max > 0.0f) ? (e.shield / e.stats.shield_max) : 0.0f;
+            if (luam && e.def_type) {
+                if (prev_ratio < 1.0f && ratio >= 1.0f) luam->call_entity_on_shield_full(e.def_type, e);
+                if (prev_ratio >= 0.5f && ratio < 0.5f) luam->call_entity_on_shield_under_50(e.def_type, e);
+                if (prev_ratio >= 0.25f && ratio < 0.25f) luam->call_entity_on_shield_under_25(e.def_type, e);
+            }
+            e.last_shield_ratio = ratio;
         }
         if (e.type_ == ids::ET_PLAYER && e.equipped_gun_vid.has_value()) {
             if (auto* gi = ss->guns.get(*e.equipped_gun_vid)) {
@@ -232,6 +263,7 @@ void sim_shield_and_reload() {
                         gi->reload_progress = 0.0f;
                         gi->burst_remaining = 0;
                         gi->burst_timer = 0.0f;
+                        if (luam && ss->player_vid) { if (auto* plmm = ss->entities.get_mut(*ss->player_vid)) if (plmm->def_type) luam->call_entity_on_reload_finish(plmm->def_type, *plmm); }
                     }
                 }
             }
@@ -262,8 +294,10 @@ void sim_inventory_number_row() {
     for (int i = 0; i < 10; ++i) {
         if (nums[i] && !prev[i]) {
             std::size_t idx = (i == 9) ? 9 : (std::size_t)i;
-            ss->inventory.set_selected_index(idx);
-            const InvEntry* ent = ss->inventory.selected_entry();
+            Inventory* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr);
+            if (!inv) return;
+            inv->set_selected_index(idx);
+            const InvEntry* ent = inv->selected_entry();
             if (ss->drop_mode) {
                 if (!ent) {
                     ss->alerts.push_back({std::string("Slot empty"), 0.0f, 1.5f, false});
@@ -307,7 +341,7 @@ void sim_inventory_number_row() {
                                 if (auto* pm = ss->metrics_for(*ss->player_vid))
                                     pm->guns_dropped += 1;
                             }
-                            ss->inventory.remove_slot(idx);
+                            inv->remove_slot(idx);
                             ss->alerts.push_back({std::string("Dropped gun: ") + nm, 0.0f, 2.0f, false});
                         } else {
                             if (const ItemInstance* inst = ss->items.get(ent->vid)) {
@@ -331,7 +365,7 @@ void sim_inventory_number_row() {
                                     }
                                 } else {
                                     ss->ground_items.spawn(ent->vid, place_pos);
-                                    ss->inventory.remove_slot(idx);
+                                    inv->remove_slot(idx);
                                 }
                                 if (ss->player_vid) {
                                     if (auto* pm = ss->metrics_for(*ss->player_vid))
@@ -379,18 +413,13 @@ void sim_step() {
     // Poll events and build inputs
     ss->input_state.wheel_delta = 0.0f;
     SDL_Event ev;
-    bool request_quit = false;
     while (SDL_PollEvent(&ev)) {
-        if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE)
-            request_quit = true;
-        process_event(ev, request_quit);
-        if (ev.type == SDL_QUIT)
-            request_quit = true;
+        process_event(ev);
     }
     Uint64 t_now = SDL_GetPerformanceCounter();
     double dt = static_cast<double>(t_now - t_last) / static_cast<double>(perf_freq);
     if (dt < 0.0) dt = 0.0;
-    ss->dt = dt;
+    ss->dt = static_cast<float>(dt);
     t_last = t_now;
 
     collect_inputs();
@@ -471,9 +500,9 @@ void sim_step() {
                 bool overlaps = !(right <= exl || left >= exr || bottom <= ext || top >= exb);
                 if (overlaps) {
                     if (ss->exit_countdown < 0.0f) {
-                        ss->exit_countdown = g_settings ? g_settings->exit_countdown_seconds : EXIT_COUNTDOWN_SECONDS;
+                        ss->exit_countdown = ss->settings.exit_countdown_seconds;
                         ss->alerts.push_back({"Exit reached: hold to leave", 0.0f, 2.0f, false});
-                        std::printf("[room] Exit reached, starting %.1fs countdown...\n", (double)(g_settings ? g_settings->exit_countdown_seconds : EXIT_COUNTDOWN_SECONDS));
+                        std::printf("[room] Exit reached, starting %.1fs countdown...\n", (double)(ss->settings.exit_countdown_seconds));
                     }
                 } else {
                     if (ss->exit_countdown >= 0.0f) {
@@ -564,7 +593,7 @@ void sim_step() {
 
             // Camera follow
             if (ss->player_vid && gg) {
-                auto& gfx = *gfx;
+                auto& gfx = *gg;
                 const Entity* player_cam = ss->entities.get(*ss->player_vid);
                 if (player_cam) {
                     int ww = 0, wh = 0; if (gfx.renderer) SDL_GetRendererOutputSize(gfx.renderer, &ww, &wh);
@@ -576,7 +605,7 @@ void sim_step() {
                     mouse_world.y = gfx.play_cam.pos.y + (sy - (float)wh * 0.5f) * inv_scale;
                     glm::vec2 target = player_cam->pos;
                     if (ss->camera_follow_enabled) {
-                        float cff = g_settings ? g_settings->camera_follow_factor : CAMERA_FOLLOW_FACTOR;
+                        float cff = ss->settings.camera_follow_factor;
                         target = player_cam->pos + (mouse_world - player_cam->pos) * cff;
                     }
                     gfx.play_cam.pos = target;
@@ -610,7 +639,7 @@ void sim_step() {
                                         if (luam) {
                                             luam->call_on_active_reload(*plm);
                                             luam->call_gun_on_active_reload(gim->def_type, *plm);
-                                            for (const auto& entry : ss->inventory.entries) if (entry.kind == INV_ITEM) if (const ItemInstance* inst = ss->items.get(entry.vid)) luam->call_item_on_active_reload(inst->def_type, *plm);
+            if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) if (entry.kind == INV_ITEM) if (const ItemInstance* inst = ss->items.get(entry.vid)) luam->call_item_on_active_reload(inst->def_type, *plm);
                                         }
                                     } else if (!gim->ar_consumed) {
                                         gim->ar_consumed = true; gim->ar_failed_attempt = true;
@@ -620,13 +649,13 @@ void sim_step() {
                                         if (luam) {
                                             luam->call_on_failed_active_reload(*plm);
                                             luam->call_gun_on_failed_active_reload(gim->def_type, *plm);
-                                            for (const auto& entry : ss->inventory.entries) if (entry.kind == INV_ITEM) if (const ItemInstance* inst = ss->items.get(entry.vid)) luam->call_item_on_failed_active_reload(inst->def_type, *plm);
+            if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) if (entry.kind == INV_ITEM) if (const ItemInstance* inst = ss->items.get(entry.vid)) luam->call_item_on_failed_active_reload(inst->def_type, *plm);
                                         }
                                     } else if (gim->ar_consumed && gim->ar_failed_attempt) {
                                         if (luam) {
                                             luam->call_on_tried_after_failed_ar(*plm);
                                             luam->call_gun_on_tried_after_failed_ar(gim->def_type, *plm);
-                                            for (const auto& entry : ss->inventory.entries) if (entry.kind == INV_ITEM) if (const ItemInstance* inst = ss->items.get(entry.vid)) luam->call_item_on_tried_after_failed_ar(inst->def_type, *plm);
+            if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) if (entry.kind == INV_ITEM) if (const ItemInstance* inst = ss->items.get(entry.vid)) luam->call_item_on_tried_after_failed_ar(inst->def_type, *plm);
                                         }
                                     }
                                 } else if (gim->ammo_reserve > 0) {
@@ -701,7 +730,7 @@ void sim_step() {
                             if (luam && gd->projectile_type != 0) {
                                 if (auto const* pd = luam->find_projectile(gd->projectile_type)) {
                                     proj_type = pd->type; proj_speed = pd->speed; proj_size = {pd->size_x, pd->size_y}; proj_steps = pd->physics_steps;
-                                    if (!pd->sprite.empty() && pd->sprite.find(':') != std::string::npos && sprite_id_registry) proj_sprite_id = try_get_sprite_id(pd->sprite);
+                                    if (!pd->sprite.empty() && pd->sprite.find(':') != std::string::npos) proj_sprite_id = try_get_sprite_id(pd->sprite);
                                 }
                             }
                             ammo_type = gi->ammo_type;
@@ -711,7 +740,7 @@ void sim_step() {
                                         proj_speed = ad->speed;
                                     }
                                     proj_size = {ad->size_x, ad->size_y};
-                                    if (!ad->sprite.empty() && ad->sprite.find(':') != std::string::npos && sprite_id_registry) {
+                                    if (!ad->sprite.empty() && ad->sprite.find(':') != std::string::npos) {
                                         int s = try_get_sprite_id(ad->sprite);
                                         if (s >= 0) {
                                             proj_sprite_id = s;
@@ -800,7 +829,7 @@ void sim_step() {
                             (void)pr;
                         }
                     if (ss->player_vid) { auto* plm = ss->entities.get_mut(*ss->player_vid); if (plm && plm->equipped_gun_vid.has_value()) { const GunInstance* gi = ss->guns.get(*plm->equipped_gun_vid); const GunDef* gd = nullptr; if (luam && gi) { for (auto const& g : luam->guns()) if (g.type == gi->def_type) { gd = &g; break; } } if (aa) play_sound((gd && !gd->sound_fire.empty()) ? gd->sound_fire : "base:small_shoot"); } else { if (aa) play_sound("base:small_shoot"); } } else { if (aa) play_sound("base:small_shoot"); }
-                    if (luam && ss->player_vid) { auto* plm = ss->entities.get_mut(*ss->player_vid); if (plm) { for (const auto& entry : ss->inventory.entries) { if (entry.kind == INV_ITEM) { if (const ItemInstance* inst = ss->items.get(entry.vid)) { luam->call_item_on_shoot(inst->def_type, *plm); } } } } }
+                    if (luam && ss->player_vid) { auto* plm = ss->entities.get_mut(*ss->player_vid); if (plm) { if (auto* inv = ss->inv_for(*ss->player_vid)) { for (const auto& entry : inv->entries) { if (entry.kind == INV_ITEM) { if (const ItemInstance* inst = ss->items.get(entry.vid)) { luam->call_item_on_shoot(inst->def_type, *plm); } } } } } }
                     if (ss->player_vid && fire_mode == "burst" && burst_step && burst_rpm > 0.0f) { ss->gun_cooldown = std::max(0.01f, 60.0f / burst_rpm); auto* plm2 = ss->entities.get_mut(*ss->player_vid); if (plm2 && plm2->equipped_gun_vid.has_value()) { if (auto* gim2 = ss->guns.get(*plm2->equipped_gun_vid)) { gim2->burst_remaining = std::max(0, gim2->burst_remaining - 1); gim2->burst_timer = ss->gun_cooldown; } } }
                     else { ss->gun_cooldown = std::max(0.05f, 60.0f / rpm); if (ss->player_vid && fire_mode == "burst") { auto* plm2 = ss->entities.get_mut(*ss->player_vid); if (plm2 && plm2->equipped_gun_vid.has_value()) { if (auto* gim2 = ss->guns.get(*plm2->equipped_gun_vid)) { if (gim2->burst_remaining <= 0) gim2->burst_timer = 0.0f; } } } }
                 }
@@ -814,9 +843,9 @@ void sim_step() {
             if (ss->player_vid && luam) {
                 Entity* plat = ss->entities.get_mut(*ss->player_vid);
                 if (plat) {
-                    const float dt = TIMESTEP;
+                    const float tick_dt = TIMESTEP;
                     const int MAX_TICKS = 4000; int tick_calls = 0;
-                    for (const auto& entry : ss->inventory.entries) {
+                    if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) {
                         if (entry.kind != INV_GUN)
                             continue;
                         GunInstance* gi = ss->guns.get(entry.vid);
@@ -825,11 +854,11 @@ void sim_step() {
                         const GunDef* gd = nullptr;
                         for (auto const& g : luam->guns())
                             if (g.type == gi->def_type) { gd = &g; break; }
-                        if (!gd || gd->on_step_ref < 0)
+                        if (!gd || !gd->on_step.valid())
                             continue;
                         if (gd->tick_rate_hz <= 0.0f || gd->tick_phase == "before")
                             continue;
-                        gi->tick_acc += dt;
+                        gi->tick_acc += tick_dt;
                         float period = 1.0f / std::max(1.0f, gd->tick_rate_hz);
                         while (gi->tick_acc >= period && tick_calls < MAX_TICKS) {
                             luam->call_gun_on_step(gi->def_type, *plat);
@@ -837,7 +866,7 @@ void sim_step() {
                             ++tick_calls;
                         }
                     }
-                    for (const auto& entry : ss->inventory.entries) {
+                    if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) for (const auto& entry : inv->entries) {
                         if (entry.kind != INV_ITEM)
                             continue;
                         ItemInstance* inst = ss->items.get(entry.vid);
@@ -846,11 +875,11 @@ void sim_step() {
                         const ItemDef* idf = nullptr;
                         for (auto const& d : luam->items())
                             if (d.type == inst->def_type) { idf = &d; break; }
-                        if (!idf || idf->on_tick_ref < 0)
+                        if (!idf || !idf->on_tick.valid())
                             continue;
                         if (idf->tick_rate_hz <= 0.0f || idf->tick_phase == "before")
                             continue;
-                        inst->tick_acc += dt;
+                        inst->tick_acc += tick_dt;
                         float period = 1.0f / std::max(1.0f, idf->tick_rate_hz);
                         while (inst->tick_acc >= period && tick_calls < MAX_TICKS) {
                             luam->call_item_on_tick(inst->def_type, *plat, period);
@@ -866,7 +895,7 @@ void sim_step() {
         if (ss->mode == ids::MODE_SCORE_REVIEW && ss->score_ready_timer <= 0.0f) {
             if (ss->menu_inputs.confirm || ss->playing_inputs.use_center || ss->mouse_inputs.left) {
                 for (auto& gi : ss->ground_items.data()) if (gi.active) { ss->items.free(gi.item_vid); gi.active = false; }
-                for (auto& gg : ss->ground_guns.data()) if (gg.active) { ss->guns.free(gg.gun_vid); gg.active = false; }
+                for (auto& ggun : ss->ground_guns.data()) if (ggun.active) { ss->guns.free(ggun.gun_vid); ggun.active = false; }
                 std::printf("[room] Proceeding to next area info screen.\n");
                 ss->mode = ids::MODE_NEXT_STAGE; ss->score_ready_timer = 0.5f; ss->input_lockout_timer = 0.2f;
             }
@@ -930,21 +959,21 @@ void sim_ground_repulsion() {
     for (auto& gi : ss->ground_items.data())
         if (gi.active) {
             glm::vec2 ih = gi.size * 0.5f;
-            for (auto& gg : ss->ground_guns.data())
-                if (gg.active) {
-                    glm::vec2 gh = gg.size * 0.5f;
-                    bool overlap = !((gi.pos.x + ih.x) <= (gg.pos.x - gh.x) ||
-                                     (gi.pos.x - ih.x) >= (gg.pos.x + gh.x) ||
-                                     (gi.pos.y + ih.y) <= (gg.pos.y - gh.y) ||
-                                     (gi.pos.y - ih.y) >= (gg.pos.y + gh.y));
+            for (auto& ggun : ss->ground_guns.data())
+                if (ggun.active) {
+                    glm::vec2 gh = ggun.size * 0.5f;
+                    bool overlap = !((gi.pos.x + ih.x) <= (ggun.pos.x - gh.x) ||
+                                     (gi.pos.x - ih.x) >= (ggun.pos.x + gh.x) ||
+                                     (gi.pos.y + ih.y) <= (ggun.pos.y - gh.y) ||
+                                     (gi.pos.y - ih.y) >= (ggun.pos.y + gh.y));
                     if (overlap) {
-                        glm::vec2 d = gi.pos - gg.pos;
+                        glm::vec2 d = gi.pos - ggun.pos;
                         if (d.x == 0 && d.y == 0) d = {0.01f, 0.0f};
                         float len = std::sqrt(d.x * d.x + d.y * d.y);
                         if (len < 1e-3f) len = 1.0f;
                         d /= len;
                         gi.pos += d * 0.01f;
-                        gg.pos -= d * 0.01f;
+                        ggun.pos -= d * 0.01f;
                     }
                 }
         }
@@ -969,20 +998,20 @@ void sim_ground_repulsion() {
                         gi.pos += d * 0.012f;
                     }
                 }
-            for (auto& gg : ss->ground_guns.data())
-                if (gg.active) {
-                    glm::vec2 gh = gg.size * 0.5f;
-                    bool overlap = !((gg.pos.x + gh.x) <= (c.pos.x - ch.x) ||
-                                     (gg.pos.x - gh.x) >= (c.pos.x + ch.x) ||
-                                     (gg.pos.y + gh.y) <= (c.pos.y - ch.y) ||
-                                     (gg.pos.y - gh.y) >= (c.pos.y + ch.y));
+            for (auto& ggun : ss->ground_guns.data())
+                if (ggun.active) {
+                    glm::vec2 gh = ggun.size * 0.5f;
+                    bool overlap = !((ggun.pos.x + gh.x) <= (c.pos.x - ch.x) ||
+                                     (ggun.pos.x - gh.x) >= (c.pos.x + ch.x) ||
+                                     (ggun.pos.y + gh.y) <= (c.pos.y - ch.y) ||
+                                     (ggun.pos.y - gh.y) >= (c.pos.y + ch.y));
                     if (overlap) {
-                        glm::vec2 d = gg.pos - c.pos;
+                        glm::vec2 d = ggun.pos - c.pos;
                         if (d.x == 0 && d.y == 0) d = {0.01f, 0.0f};
                         float len = std::sqrt(d.x * d.x + d.y * d.y);
                         if (len < 1e-3f) len = 1.0f;
                         d /= len;
-                        gg.pos += d * 0.012f;
+                        ggun.pos += d * 0.012f;
                     }
                 }
         }
@@ -1062,7 +1091,7 @@ void sim_update_crates_open() {
                             if (ig != luam->guns().end()) {
                                 if (auto gv = ss->guns.spawn_from_def(*ig)) {
                                     int sid = -1;
-                                    if (sprite_id_registry) {
+                                    {
                                         if (!ig->sprite.empty() && ig->sprite.find(':') != std::string::npos)
                                             sid = try_get_sprite_id(ig->sprite);
                                     }
@@ -1156,31 +1185,64 @@ void sim_step_projectiles() {
                     if (h.owner) if (auto* om = ss->metrics_for(*h.owner)) om->damage_dealt += (std::uint64_t)std::lround(took);
                     dmg -= took; if (dmg < 0.0f) dmg = 0.0f;
                 }
-                if (dmg > 0.0f && e.stats.plates > 0) { e.stats.plates -= 1; if (auto* pm = ss->metrics_for(e.vid)) pm->plates_consumed += 1; dmg = 0.0f; }
+                if (dmg > 0.0f && e.stats.plates > 0) { e.stats.plates -= 1; if (auto* pm = ss->metrics_for(e.vid)) pm->plates_consumed += 1; if (e.stats.plates == 0 && luam && e.def_type) luam->call_entity_on_plates_lost(e.def_type, e); dmg = 0.0f; }
+                if (luam && e.def_type)
+                    luam->call_entity_on_damage(e.def_type, e, (int)std::lround(ap));
                 if (dmg > 0.0f) {
                     float reduction = std::max(0.0f, e.stats.armor - (float)ap);
                     reduction = std::min(75.0f, reduction);
                     float scale = 1.0f - reduction * 0.01f;
                     int delt = (int)std::ceil((double)dmg * (double)scale);
                     uint32_t before = e.health;
+                    uint32_t before_hp = e.health;
                     e.health = (e.health > (uint32_t)delt) ? (e.health - (uint32_t)delt) : 0u;
                     if (auto* pm = ss->metrics_for(e.vid)) pm->damage_taken_hp += (std::uint64_t)(before - e.health);
                     if (h.owner) if (auto* om = ss->metrics_for(*h.owner)) om->damage_dealt += (std::uint64_t)delt;
+                    if (luam && e.def_type && e.max_hp > 0) {
+                        float prev = (float)before_hp / (float)e.max_hp;
+                        float now = (float)e.health / (float)e.max_hp;
+                        if (prev >= 1.0f && now < 1.0f) { /* left full */ }
+                        if (prev >= 0.5f && now < 0.5f) luam->call_entity_on_hp_under_50(e.def_type, e);
+                        if (prev >= 0.25f && now < 0.25f) luam->call_entity_on_hp_under_25(e.def_type, e);
+                        if (now <= 0.0f) { /* death handled elsewhere */ }
+                    }
                 }
             } else {
-                if (e.stats.plates > 0) { e.stats.plates -= 1; dmg = 0.0f; }
+                if (e.stats.plates > 0) { e.stats.plates -= 1; if (e.stats.plates == 0 && luam && e.def_type) luam->call_entity_on_plates_lost(e.def_type, e); dmg = 0.0f; }
+                if (luam && e.def_type)
+                    luam->call_entity_on_damage(e.def_type, e, (int)std::lround(ap));
                 if (dmg > 0.0f) {
                     float reduction = std::max(0.0f, e.stats.armor - (float)ap);
                     reduction = std::min(75.0f, reduction);
                     float scale = 1.0f - reduction * 0.01f;
                     int delt = (int)std::ceil((double)dmg * (double)scale);
+                    uint32_t before_hp = e.health;
                     e.health = (e.health > (uint32_t)delt) ? (e.health - (uint32_t)delt) : 0u;
                     if (h.owner) if (auto* pm = ss->metrics_for(*h.owner)) pm->damage_dealt += (std::uint64_t)delt;
+                    if (luam && e.def_type && e.max_hp > 0) {
+                        float prev = (float)before_hp / (float)e.max_hp;
+                        float now = (float)e.health / (float)e.max_hp;
+                        if (prev >= 0.5f && now < 0.5f) luam->call_entity_on_hp_under_50(e.def_type, e);
+                        if (prev >= 0.25f && now < 0.25f) luam->call_entity_on_hp_under_25(e.def_type, e);
+                    }
                 }
             }
         }
+        // HP/shield full triggers
+        if (luam && e.def_type && e.max_hp > 0) {
+            float now_hp = (float)e.health / (float)e.max_hp;
+            if (e.last_hp_ratio < 1.0f && now_hp >= 1.0f) luam->call_entity_on_hp_full(e.def_type, e);
+            e.last_hp_ratio = now_hp;
+            if (e.stats.shield_max > 0.0f) {
+                float now_sh = e.stats.shield_max > 0.0f ? (e.shield / e.stats.shield_max) : 0.0f;
+                if (e.last_shield_ratio < 1.0f && now_sh >= 1.0f) luam->call_entity_on_shield_full(e.def_type, e);
+                e.last_shield_ratio = now_sh;
+            }
+            if (e.last_plates < 0) e.last_plates = e.stats.plates;
+        }
         e.time_since_damage = 0.0f;
         if (e.type_ == ids::ET_NPC && e.health == 0) {
+            if (luam && e.def_type) luam->call_entity_on_death(e.def_type, e);
             glm::vec2 pos = e.pos;
             e.active = false;
             ss->metrics.enemies_slain += 1;
@@ -1218,7 +1280,7 @@ void sim_step_projectiles() {
                                 auto* p = ss->pickups.spawn((uint32_t)it->type, it->name, place_pos);
                                 if (p) {
                                     ss->metrics.powerups_spawned += 1;
-                                    if (sprite_id_registry) {
+                                    {
                                         if (!it->sprite.empty() && it->sprite.find(':') != std::string::npos)
                                             p->sprite_id = try_get_sprite_id(it->sprite);
                                         else p->sprite_id = -1;
@@ -1244,7 +1306,7 @@ void sim_step_projectiles() {
                             if (itg != luam->guns().end()) {
                                 if (auto inst = ss->guns.spawn_from_def(*itg)) {
                                     int gspr = -1;
-                                    if (sprite_id_registry) {
+                                    {
                                         if (!itg->sprite.empty() && itg->sprite.find(':') != std::string::npos)
                                             gspr = try_get_sprite_id(itg->sprite);
                                         else gspr = -1;
@@ -1261,7 +1323,7 @@ void sim_step_projectiles() {
                     auto* p = ss->pickups.spawn((uint32_t)pu.type, pu.name, place_pos);
                     if (p) {
                         ss->metrics.powerups_spawned += 1;
-                        if (sprite_id_registry) {
+                        {
                             if (!pu.sprite.empty() && pu.sprite.find(':') != std::string::npos)
                                 p->sprite_id = try_get_sprite_id(pu.sprite);
                             else p->sprite_id = -1;
@@ -1303,11 +1365,11 @@ void sim_handle_pickups() {
             return w * h;
         };
         for (std::size_t i = 0; i < ss->ground_guns.data().size(); ++i) {
-            auto const& gg = ss->ground_guns.data()[i];
-            if (!gg.active) continue;
-            glm::vec2 gh = gg.size * 0.5f;
-            float gl = gg.pos.x - gh.x, gr = gg.pos.x + gh.x;
-            float gt = gg.pos.y - gh.y, gb = gg.pos.y + gh.y;
+            auto const& ggun = ss->ground_guns.data()[i];
+            if (!ggun.active) continue;
+            glm::vec2 gh = ggun.size * 0.5f;
+            float gl = ggun.pos.x - gh.x, gr = ggun.pos.x + gh.x;
+            float gt = ggun.pos.y - gh.y, gb = ggun.pos.y + gh.y;
             float area = overlap_area(pl, pt, pr, pb, gl, gt, gr, gb);
             if (area > best_area) { best_area = area; best_kind = PickKind::Gun; best_index = i; }
         }
@@ -1321,20 +1383,20 @@ void sim_handle_pickups() {
             if (area > best_area) { best_area = area; best_kind = PickKind::Item; best_index = i; }
         }
         if (best_kind == PickKind::Gun) {
-            auto& gg = ss->ground_guns.data()[best_index];
-            bool ok = ss->inventory.insert_existing(INV_GUN, gg.gun_vid);
+            auto& ggun = ss->ground_guns.data()[best_index];
+            bool ok = false; if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) ok = inv->insert_existing(INV_GUN, ggun.gun_vid);
             std::string nm = "gun";
             if (luam) {
-                if (const GunInstance* gi = ss->guns.get(gg.gun_vid)) {
+                if (const GunInstance* gi = ss->guns.get(ggun.gun_vid)) {
                     for (auto const& g : luam->guns()) if (g.type == gi->def_type) { nm = g.name; break; }
                 }
             }
             if (ok) {
-                gg.active = false;
+                ggun.active = false;
                 did_pick = true;
                 ss->alerts.push_back({std::string("Picked up ") + nm, 0.0f, 2.0f, false});
                 if (ss->player_vid) if (auto* pm = ss->metrics_for(*ss->player_vid)) pm->guns_picked += 1;
-                if (const GunInstance* ggi = ss->guns.get(gg.gun_vid)) {
+                if (const GunInstance* ggi = ss->guns.get(ggun.gun_vid)) {
                     const GunDef* gd = nullptr;
                     if (luam) for (auto const& g : luam->guns()) if (g.type == ggi->def_type) { gd = &g; break; }
                     if (luam && ss->player_vid) if (auto* plent = ss->entities.get_mut(*ss->player_vid)) luam->call_gun_on_pickup(ggi->def_type, *plent);
@@ -1353,7 +1415,8 @@ void sim_handle_pickups() {
             }
             bool fully_merged = false;
             if (pick) {
-                for (auto& e : ss->inventory.entries) {
+                if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr))
+                for (auto& e : inv->entries) {
                     if (e.kind != INV_ITEM) continue;
                     ItemInstance* tgt = ss->items.get(e.vid);
                     if (!tgt) continue;
@@ -1372,7 +1435,7 @@ void sim_handle_pickups() {
                 }
             }
             if (!fully_merged) {
-                bool ok = ss->inventory.insert_existing(INV_ITEM, gi.item_vid);
+                bool ok = false; if (auto* inv = (ss->player_vid ? ss->inv_for(*ss->player_vid) : nullptr)) ok = inv->insert_existing(INV_ITEM, gi.item_vid);
                 if (ok) {
                     gi.active = false;
                     did_pick = true;
