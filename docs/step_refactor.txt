@@ -1,0 +1,45 @@
+Step Refactor Plan (Dispatcher + Flat Files)
+
+Goals
+- Replace monolithic step.cpp with a small dispatcher.
+- Split logic into plain, domain-named files under src/ (no features/ folder).
+- Keep behavior identical during migration; minimize risk.
+
+Target Shape
+- src/step/dispatcher.cpp: step() routes by ss->mode.
+- src/step/mode_title.cpp: step_title().
+- src/step/mode_playing.cpp: step_playing() runs fixed-timestep loop.
+- src/step/mode_score_review.cpp: step_score_review().
+- src/step/mode_next_stage.cpp: step_next_stage().
+- src/step/mode_game_over.cpp: step_game_over().
+
+Flat Modules (no features/ dir)
+- src/camera.cpp/.hpp: update_camera_follow().
+- src/player_movement.cpp/.hpp: update_movement_and_collision(), update_movement_spread().
+- src/player_combat.cpp/.hpp: update_shields_and_reload_progress(), update_reload_active(), update_trigger_and_fire(), update_unjam().
+- src/pickups_inventory.cpp/.hpp: auto_pickup_powerups(), handle_manual_pickups(), separate_ground_items(), toggle_drop_mode(), handle_inventory_hotbar().
+- src/projectiles_step.cpp/.hpp: step_projectiles_and_hits().
+- src/progression.cpp/.hpp: update_exit_countdown(), start_score_review_if_ready(), cleanup_for_stage_transition(), confirm_next_stage(), enter_next_area().
+- src/scripting_ticks.cpp/.hpp: pre_physics_ticks(), post_physics_ticks().
+- src/alerts.cpp/.hpp: age_and_prune_alerts(float dt).
+- src/crates.cpp/.hpp: update_crates_open().
+
+Initial Wiring (low risk)
+- DONE: Rename legacy step() to step_playing_legacy() and add src/step_dispatcher.cpp.
+- DONE: Add mode stubs and declare mode functions in step.hpp.
+- DONE: Create mode_playing.cpp with single-tick step and call flat modules.
+- DONE: Move fixed-timestep catch-up into dispatcher and call per-mode steps.
+
+Migration Phases
+1) Create mode_playing.cpp and paste legacy step body into step_playing(), keeping includes/globals. Dispatcher switches to call step_playing() when stable.
+2) DONE: Extract camera.cpp (update_camera_follow), pickups_inventory.* (auto/manual + repulsion), crates.cpp (update_crates_open). Wired in legacy.
+3) DONE: Extract player_combat.*: update_unjam(), update_reload_active(), update_trigger_and_fire(). Wired in legacy.
+4) DONE: Extract progression.*: update_exit_countdown() + start_score_review_if_ready(), and review/next-stage/enter-area transitions. Wired in legacy.
+5) Extract scripting_ticks.* (pre_/post_) and crates.* (update_crates_open). Replace calls.
+6) DONE: Introduce mode_* files (title/score_review/next_stage/game_over) and wire them.
+7) DONE: Remove legacy step_playing_legacy() and delete old fragments (src/step.cpp removed).
+
+Notes
+- Keep function names verb-first, simple; no "sim" prefix.
+- Continue using globals during migration; consider passing State& later.
+- DONE: sim_step() in src/sim.cpp was redundant; removed after dispatcher became authoritative.

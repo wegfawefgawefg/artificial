@@ -16,6 +16,14 @@ struct LuaManager {
     bool available() const;
     bool init();
     bool load_mods();
+    // Allow registration helpers to access internals without exposing sol types
+    friend void lua_register_powerups(sol::state& s, LuaManager& m);
+    friend void lua_register_items(sol::state& s, LuaManager& m);
+    friend void lua_register_guns(sol::state& s, LuaManager& m);
+    friend void lua_register_ammo(sol::state& s, LuaManager& m);
+    friend void lua_register_projectiles(sol::state& s, LuaManager& m);
+    friend void lua_register_crates(sol::state& s, LuaManager& m);
+    friend void lua_register_entities(sol::state& s, LuaManager& m);
     // Trigger calls
     bool call_item_on_use(int item_type, struct Entity& player, std::string* out_msg);
     void call_item_on_tick(int item_type, struct Entity& player, float dt);
@@ -90,6 +98,11 @@ struct LuaManager {
     void call_entity_on_plates_lost(int entity_type, struct Entity& e);
     void call_entity_on_collide_tile(int entity_type, struct Entity& e);
 
+    // Query for optional hooks (used by engine tick schedulers)
+    bool has_gun_on_step(int gun_type) const;
+    bool has_item_on_tick(int item_type) const;
+    bool has_entity_on_step(int entity_type) const;
+
     const std::vector<PowerupDef>& powerups() const {
         return powerups_;
     }
@@ -156,15 +169,8 @@ struct LuaManager {
     std::vector<CrateDef> crates_;
     std::vector<EntityTypeDef> entity_types_;
     DropTables drops_;
-    sol::protected_function on_dash;
-    sol::protected_function on_active_reload;
-    sol::protected_function on_failed_active_reload;
-    sol::protected_function on_tried_after_failed_ar;
-    sol::protected_function on_step;
-    sol::protected_function on_eject;
-    sol::protected_function on_reload_start;
-    sol::protected_function on_reload_finish;
 
     lua_State* L{nullptr};
     sol::state* S{nullptr};
+    struct LuaHooks* hooks_{nullptr};
 };

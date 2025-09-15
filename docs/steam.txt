@@ -1,0 +1,130 @@
+Use a split “transport + directory” design. Steam is just one backend.
+
+Sir dude:
+
+## Networking stack
+
+* **Abstraction**
+
+  * `INetTransport` { `listen()`, `connect(addr)`, `send(chan, bytes)`, `poll()` }
+  * `IMatchmaking` { `create_lobby()`, `join_lobby(id)`, `lobby_members()`, `lobby_kv()` }
+* **Backends**
+
+  1. **Steam build**
+
+     * Transport: **SteamNetworkingSockets**.
+     * Matchmaking: **Steam Lobbies**.
+     * NAT: Steam relays.
+  2. **Non-Steam build**
+
+     * Transport: **GameNetworkingSockets (open-source)** or **ENet**.
+     * Matchmaking: your tiny REST/WebSocket service.
+     * NAT: direct UDP + UPnP; optional TURN-style relay you host.
+* **Authority model**
+
+  * Host-authoritative P2P (one peer acts as server). Same game logic both builds.
+
+## Protocol
+
+* Serialize with **FlatBuffers** or **Protobuf**. One message schema across all transports.
+* Channels: reliable-ordered for state, unreliable for input/events.
+* Version gate: `{game_version, net_proto, mod_hash}` handshake. Disconnect on mismatch.
+
+## “Join friend on Steam” and cross-play
+
+* If Steam present:
+
+  * Click “Join Friend” → Steam Lobby → host’s SteamNetworking identity. Done.
+* If non-Steam:
+
+  * Show a 6–8 char **room code** backed by your matchmaking server that returns the host’s connect string for your UDP transport.
+* Optional bridge:
+
+  * Let Steam build also host a **non-Steam port**. Same host can share both codes.
+
+## Mod ecosystem
+
+* **Sources** (pluggable):
+
+  * `SteamWorkshopSource` (optional, only on Steam).
+  * `HttpRegistrySource` (your CDN + JSON index).
+  * `LocalFolderSource` (`mods/`).
+* **Identity**
+
+  * `ModId = {namespace, name}`. Versions are SemVer. Packs are **content-addressed**: `sha256.tar.zst`.
+* **Manifest**
+
+  * `mod.toml`: `{id, version, deps[], capabilities[], files[], signatures[]}`.
+* **Sync on join**
+
+  1. Host sends **required set** = closure(deps + exact versions) with hashes.
+  2. Client diff → fetch missing from allowed sources.
+  3. Verify hash + signature → install into per-version dir.
+  4. Reload VM per mod, run quick self-test hook.
+* **Policy**
+
+  * Multiplayer whitelist: gameplay-affecting mods must be **host-approved**. Cosmetic mods can be client-only.
+  * Block if `api_major` mismatch. Use `caps().has("…")` for minor features.
+
+## In-game mod browser
+
+* Unified UI over sources:
+
+  * Tabs: **Installed / Available / Updates**.
+  * Filters: compatible with `api_major`, has capability X, category.
+  * Actions: install, update, enable/disable, view changelog.
+* Background worker does HTTP/Workshop I/O. zstd decompress on a thread.
+
+## Steam integration details
+
+* Wrap all Steam calls behind `ISteamPlatform`:
+
+  * Auth, Lobbies, P2P Sessions, Achievements.
+* Build flavors:
+
+  * `-DUSE_STEAM=ON` links Steamworks and enables Steam backends.
+  * `-DUSE_STEAM=OFF` compiles with **GameNetworkingSockets** only.
+* No Steam DRM dependence. Game runs identically off Steam.
+
+## Minimal interfaces (C++)
+
+```cpp
+struct INetTransport {
+  virtual bool listen(uint16_t port)=0;
+  virtual bool connect(std::string_view addr)=0; // steam: lobby join token; udp: ip:port
+  virtual bool send(int channel, gsl::span<const std::byte>)=0;
+  virtual bool poll(std::function<void(PeerId,int,gsl::span<const std::byte>)>)=0;
+  virtual void close(PeerId)=0;
+  virtual ~INetTransport()=default;
+};
+
+struct IMatchmaking {
+  virtual LobbyId create(const LobbyParams&)=0;
+  virtual bool join(LobbyId)=0;
+  virtual std::vector<PeerId> members(LobbyId)=0;
+  virtual std::string get(LobbyId,std::string_view key)=0;
+  virtual void set(LobbyId,std::string_view key,std::string_view val)=0; // put mod set here
+  virtual ~IMatchmaking()=default;
+};
+
+struct IModsRepo {
+  virtual std::optional<ModPack> fetch(const ModId&, const SemVer&)=0; // may route to Steam/HTTP
+};
+```
+
+## Practical libs
+
+* **GameNetworkingSockets** (Valve OSS) for transport in both builds. Steam build gets relays. Non-Steam uses direct UDP.
+* **ENet** if you want simpler UDP instead.
+* **libcurl** + **zstd** for mod downloads.
+* **Sol2** stays internal behind `mods::Host`, as you planned.
+
+## Rollout plan
+
+1. Implement `INetTransport` with GameNetworkingSockets. Ship LAN/direct connect.
+2. Add your minimal matchmaking server (HTTP + WS, \~200 LOC Go/Rust). Room codes.
+3. Add Steam layer: lobbies + SteamNetworkingSockets path. “Join Friend” works.
+4. Build mod registry HTTP. Then add Steam Workshop as an **extra source**, not the only one.
+5. Ship mod sync with hash gate. Enforce gameplay-mod whitelist in multiplayer.
+
+This keeps Steam users happy while non-Steam works from day one. Mods are first-class and source-agnostic.

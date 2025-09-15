@@ -2,7 +2,6 @@
 
 #include <string>
 #include <vector>
-#include <sol/sol.hpp>
 
 // Plain data structs used by mods. Keep sol types here so other headers
 // don’t need to include sol directly.
@@ -26,18 +25,7 @@ struct ItemDef {
     // Optional ticking (opt-in)
     float tick_rate_hz{0.0f};
     std::string tick_phase; // "before" or "after" (default after)
-    sol::protected_function on_use;
-    sol::protected_function on_tick;
-    sol::protected_function on_shoot;
-    sol::protected_function on_damage;
-    sol::protected_function on_active_reload;
-    sol::protected_function on_failed_active_reload;
-    sol::protected_function on_tried_after_failed_ar;
-    sol::protected_function on_pickup;
-    sol::protected_function on_drop;
-    sol::protected_function on_eject;
-    sol::protected_function on_reload_start;
-    sol::protected_function on_reload_finish;
+    // callbacks stored internally; not exposed here
 };
 
 struct AmmoCompat { int type{0}; float weight{1.0f}; };
@@ -59,7 +47,6 @@ struct GunDef {
     std::string sound_reload;
     std::string sound_jam;
     std::string sound_pickup;
-    sol::protected_function on_jam;     // optional Lua callback
     float jam_chance{0.0f}; // per-gun additive jam chance
     int projectile_type{0}; // projectile def to use
     std::string fire_mode;  // "auto", "single", or "burst"
@@ -76,18 +63,9 @@ struct GunDef {
     float ar_size{0.15f};             // size 0..1
     float ar_size_variance{0.0f};     // +/- variance applied to size
     float active_reload_window{0.0f}; // legacy fallback for ar_size when >0
-    sol::protected_function on_active_reload;
-    sol::protected_function on_failed_active_reload;
-    sol::protected_function on_tried_after_failed_ar;
-    sol::protected_function on_pickup;
-    sol::protected_function on_drop;
-    sol::protected_function on_step;
     // Optional ticking (opt-in)
     float tick_rate_hz{0.0f};
     std::string tick_phase; // "before" or "after" (default after)
-    sol::protected_function on_eject;
-    sol::protected_function on_reload_start;
-    sol::protected_function on_reload_finish;
     // Ammo compatibility (weighted pick on spawn)
     std::vector<AmmoCompat> compatible_ammo; // {type, weight}
 };
@@ -99,8 +77,7 @@ struct ProjectileDef {
     float size_x = 0.2f, size_y = 0.2f;
     int physics_steps = 2;
     std::string sprite; // namespaced sprite key (e.g., "mod:bullet")
-    sol::protected_function on_hit_entity;
-    sol::protected_function on_hit_tile;
+    // callbacks stored internally; not exposed here
 };
 
 // Ammo definitions (Lua)
@@ -122,10 +99,7 @@ struct AmmoDef {
     float falloff_end{0.0f};        // distance where falloff reaches min
     float falloff_min_mult{1.0f};   // min damage multiplier at/after falloff_end
     int pierce_count{0};            // number of entities to pierce through
-    // Optional hooks
-    sol::protected_function on_hit;
-    sol::protected_function on_hit_entity;
-    sol::protected_function on_hit_tile;
+    // Optional hooks stored internally; not exposed here
 };
 
 inline const GunDef* find_gun_def_by_type(const std::vector<GunDef>& defs, int type) {
@@ -152,7 +126,7 @@ struct CrateDef {
     float open_time = 5.0f;
     std::string label;
     DropTables drops;
-    sol::protected_function on_open;
+    // on_open stored internally; not exposed here
 };
 
 // Entity type definitions (Lua)
@@ -196,25 +170,5 @@ struct EntityTypeDef {
     // Optional ticking
     float tick_rate_hz{0.0f};
     std::string tick_phase; // "before" or "after" (default after)
-    // Hooks
-    sol::protected_function on_step;
-    sol::protected_function on_damage;
-    sol::protected_function on_spawn;
-    sol::protected_function on_death;
-    // Gun/reload hooks
-    sol::protected_function on_reload_start;
-    sol::protected_function on_reload_finish;
-    sol::protected_function on_gun_jam;
-    sol::protected_function on_out_of_ammo;
-    // HP/shield thresholds
-    sol::protected_function on_hp_under_50;
-    sol::protected_function on_hp_under_25;
-    sol::protected_function on_hp_full;
-    sol::protected_function on_shield_under_50;
-    sol::protected_function on_shield_under_25;
-    sol::protected_function on_shield_full;
-    sol::protected_function on_plates_lost;
-    // Collision
-    sol::protected_function on_collide_tile;
+    // All callbacks stored internally; not exposed here
 };
-
